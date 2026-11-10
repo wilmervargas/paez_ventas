@@ -70,11 +70,11 @@ export function LoginPage() {
 
         <div className="relative flex items-center gap-3">
           <div className="grid h-11 w-11 place-items-center rounded-2xl bg-indigo-500 text-lg font-bold">
-            P
+            GC
           </div>
           <div>
-            <p className="text-base font-semibold">Páez</p>
-            <p className="text-xs text-slate-400">Gestión comercial</p>
+            <p className="text-base font-semibold">Gestión</p>
+            <p className="text-xs text-slate-400">Comercial</p>
           </div>
         </div>
 
@@ -83,10 +83,10 @@ export function LoginPage() {
             Sistema interno
           </p>
           <h1 className="text-3xl font-bold leading-tight sm:text-4xl">
-            Cobros, inventario y ventas en un solo lugar.
+            Cobros, inventario y ventas.
           </h1>
           <p className="mt-4 text-sm leading-relaxed text-slate-300">
-            Controla tus clientes, productos, pedidos y cuentas por cobrar con
+            Control de clientes, productos, pedidos y cuentas por cobrar con
             trazabilidad completa y recordatorios de pago por WhatsApp.
           </p>
           <div className="mt-8 grid grid-cols-2 gap-3 text-sm">
@@ -94,15 +94,11 @@ export function LoginPage() {
               <ShieldCheck className="mb-2 h-5 w-5 text-emerald-400" />
               Acceso seguro por roles
             </div>
-            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-              <Building2 className="mb-2 h-5 w-5 text-indigo-300" />
-              Datos fiscales centralizados
-            </div>
           </div>
         </div>
 
         <p className="relative text-xs text-slate-500">
-          © {new Date().getFullYear()} Páez · Uso interno
+          © {new Date().getFullYear()} Uso interno
         </p>
       </section>
 
@@ -114,8 +110,8 @@ export function LoginPage() {
                 P
               </div>
               <div>
-                <p className="text-sm font-semibold text-slate-900">Páez</p>
-                <p className="text-xs text-slate-500">Gestión comercial</p>
+                <p className="text-sm font-semibold text-slate-900">Gestión</p>
+                <p className="text-xs text-slate-500">Comercial</p>
               </div>
             </div>
           </div>

@@ -102,11 +102,11 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       <div className="flex h-16 items-center justify-between border-b border-white/10 px-5">
         <div className="flex items-center gap-3">
           <div className="grid h-9 w-9 place-items-center rounded-xl bg-indigo-500 text-sm font-bold text-white">
-            P
+            GC
           </div>
           <div>
-            <p className="text-sm font-semibold text-white">Páez</p>
-            <p className="text-xs text-slate-400">Gestión comercial</p>
+            <p className="text-sm font-semibold text-white">Gestión</p>
+            <p className="text-xs text-slate-400">Comercial</p>
           </div>
         </div>
         <button

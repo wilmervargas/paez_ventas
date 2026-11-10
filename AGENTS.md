@@ -157,17 +157,26 @@ Convenciones generales para todos los modelos:
 
 ```text
 User (AbstractBaseUser, PermissionsMixin)
-  email            unique, USERNAME_FIELD
+  email            unique, USERNAME_FIELD (normalizado a minúsculas)
   nombre
   telefono
   rol              admin | vendedor | cobrador | almacenista
   activo
   must_change_password
   last_login
+
+UserEmailAdicional
+  user             FK PROTECT (related_name: correos_adicionales)
+  email            unique, normalizado a minúsculas
+  is_verified      se marca True en el primer login exitoso con ese correo
+  # hereda BaseModel; no puede coincidir con el email principal de otro usuario
 ```
 
 - Manager propio (`UserManager`) con `create_user` / `create_superuser`.
 - `AUTH_USER_MODEL = "accounts.User"` **antes de la primera migración**.
+- El login acepta el correo principal o cualquiera de los adicionales
+  (`apps/accounts/backends.py`, `EmailAdicionalBackend`). Los correos se
+  normalizan a minúsculas tanto al guardarlos como al iniciar sesión.
 
 ### 5.2 company
 

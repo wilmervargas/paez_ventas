@@ -96,6 +96,9 @@ DATABASES = {
 
 AUTH_USER_MODEL = "accounts.User"
 
+# Login por email principal o correos adicionales (apps/accounts/backends.py).
+AUTHENTICATION_BACKENDS = ["apps.accounts.backends.EmailAdicionalBackend"]
+
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {

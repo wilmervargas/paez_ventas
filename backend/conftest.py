@@ -55,6 +55,16 @@ def admin_client(admin_user):
 
 
 @pytest.fixture
+def admin_site_client(admin_user):
+    """Cliente con sesión iniciada en el admin de Django (no la API)."""
+    from django.test import Client
+
+    client = Client()
+    assert client.login(email=admin_user.email, password="ClaveSegura123!")
+    return client
+
+
+@pytest.fixture
 def cobrador_client(db):
     user = User.objects.create_user(
         email="cobrador@example.com",

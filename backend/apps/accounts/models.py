@@ -1,7 +1,10 @@
 """Modelo de usuario personalizado con login por email y roles."""
 
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
+from django.core.exceptions import ValidationError
 from django.db import models
+
+from apps.common.models import BaseModel
 
 
 class Rol(models.TextChoices):
@@ -72,6 +75,11 @@ class User(AbstractBaseUser, PermissionsMixin):
     def __str__(self) -> str:
         return self.email
 
+    def save(self, *args, **kwargs):
+        """Normaliza el email para que el login no dependa de mayúsculas."""
+        self.email = BaseUserManager.normalize_email(self.email).lower()
+        super().save(*args, **kwargs)
+
     @property
     def is_admin(self) -> bool:
         return self.rol == Rol.ADMIN
@@ -79,3 +87,45 @@ class User(AbstractBaseUser, PermissionsMixin):
     @property
     def puede_ver_costos(self) -> bool:
         return self.rol == Rol.ADMIN
+
+
+class UserEmailAdicional(BaseModel):
+    """Correo adicional con el que un usuario puede iniciar sesión.
+
+    El email se guarda normalizado en minúsculas y no puede coincidir con el
+    correo principal de ningún usuario.
+    """
+
+    user = models.ForeignKey(
+        User,
+        verbose_name="usuario",
+        on_delete=models.PROTECT,
+        related_name="correos_adicionales",
+    )
+    email = models.EmailField("correo electrónico adicional", unique=True)
+    is_verified = models.BooleanField(
+        "verificado",
+        default=False,
+        help_text="Se marca automáticamente en el primer inicio de sesión con este correo.",
+    )
+
+    class Meta:
+        verbose_name = "correo adicional"
+        verbose_name_plural = "correos adicionales"
+        ordering = ("-created_at",)
+
+    def __str__(self) -> str:
+        return f"{self.email} ({self.user.email})"
+
+    def _normalizar_email(self):
+        self.email = BaseUserManager.normalize_email(self.email.strip()).lower()
+
+    def clean(self):
+        super().clean()
+        self._normalizar_email()
+        if User.objects.filter(email=self.email).exists():
+            raise ValidationError({"email": "Ese correo ya es el principal de un usuario."})
+
+    def save(self, *args, **kwargs):
+        self._normalizar_email()
+        super().save(*args, **kwargs)
