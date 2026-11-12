@@ -22,6 +22,7 @@ if not exist %BaseDir% (
 :: 2. Validar Backend
 set BackendDir=%BaseDir%\backend
 set VenvActivate=%BackendDir%\.venv\Scripts\activate.bat
+if not exist "%VenvActivate%" set VenvActivate=%BackendDir%\venv\Scripts\activate.bat
 set ManagePy=%BackendDir%\manage.py
 
 if not exist %BackendDir% goto :error_general

@@ -10,7 +10,7 @@ from django.utils import timezone
 from apps.common.exceptions import BusinessRuleError
 from apps.common.sequences import siguiente_numero
 from apps.common.utils.money import money, to_base, to_decimal
-from apps.company.services import get_empresa, get_tasa_vigente
+from apps.company.services import get_empresa, get_tasa_del_dia
 from apps.inventory.models import MovimientoInventario, Producto
 from apps.inventory.services import registrar_movimiento
 
@@ -57,19 +57,35 @@ def _normalizar_detalles(detalles: list[dict]) -> list[dict]:
     return normalizados
 
 
-def _resolver_tasa(moneda: str, tasa_cambio, empresa) -> Decimal:
+def _resolver_tasa(moneda: str, tasa_cambio, empresa, fecha=None) -> Decimal:
+    """Tasa aplicable al documento, congelada en la compra.
+
+    - Si el usuario no envía tasa, se toma la del histórico para la **fecha del
+      documento** (retroactivos incluidos): la última registrada con vigencia
+      anterior o igual a ese día.
+    - Si la envía, se respeta como sobrescritura manual y queda registrada en el
+      log de auditoría.
+    """
     moneda = (moneda or empresa.moneda_base or "USD").upper()
     if moneda == empresa.moneda_base.upper():
         return Decimal("1.000000")
 
+    vigente = get_tasa_del_dia(moneda, fecha, base=empresa.moneda_base)
     if tasa_cambio is not None:
         tasa = to_decimal(tasa_cambio)
+        if vigente is None or vigente.tasa != tasa:
+            logger.info(
+                "Compras: tasa manual %s %s para documento del %s (tasa del día: %s)",
+                tasa,
+                moneda,
+                fecha,
+                vigente.tasa if vigente else "sin tasa",
+            )
     else:
-        vigente = get_tasa_vigente(moneda)
         if vigente is None:
             raise BusinessRuleError(
-                f"No hay una tasa de cambio vigente para {moneda}. "
-                "Registra una tasa o envíala manualmente."
+                f"No hay una tasa de cambio vigente para {moneda} al {fecha}. "
+                "Registra la tasa del día o envíala manualmente."
             )
         tasa = vigente.tasa
 
@@ -93,7 +109,11 @@ def _preparar_datos(data: dict, empresa, detalles: list[dict]) -> dict:
     datos = {campo: data[campo] for campo in CAMPOS_COMPRA if campo in data}
     fecha = datos.get("fecha") or timezone.localdate()
     moneda = (datos.get("moneda") or empresa.moneda_base or "USD").upper()
-    tasa = _resolver_tasa(moneda, datos.get("tasa_cambio"), empresa)
+    tasa = _resolver_tasa(moneda, datos.get("tasa_cambio"), empresa, fecha)
+
+    # Congela la tasa BCV (Bs por 1 USD) vigente en la fecha del documento para
+    # poder mostrar equivalentes históricos aunque el registro de tasas cambie.
+    tasa_bcv = get_tasa_del_dia("VES", fecha, base="USD")
 
     normalizados = _normalizar_detalles(detalles)
     subtotal, iva, total = _calcular_totales(normalizados, empresa.iva_rate)
@@ -107,6 +127,8 @@ def _preparar_datos(data: dict, empresa, detalles: list[dict]) -> dict:
             "iva": iva,
             "total": total,
             "total_base": to_base(total, tasa),
+            "tasa_bcv": tasa_bcv.tasa if tasa_bcv else None,
+            "tasa_bcv_vigente_desde": tasa_bcv.vigente_desde if tasa_bcv else None,
         }
     )
     return datos, normalizados

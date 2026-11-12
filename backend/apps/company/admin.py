@@ -19,7 +19,7 @@ class EmpresaAdmin(admin.ModelAdmin):
 
 @admin.register(TasaCambio)
 class TasaCambioAdmin(admin.ModelAdmin):
-    list_display = ("moneda", "tasa", "fuente", "vigente_desde")
-    list_filter = ("moneda", "fuente")
-    search_fields = ("moneda",)
+    list_display = ("moneda_base", "tasa", "moneda", "fuente", "vigente_desde")
+    list_filter = ("moneda", "moneda_base", "fuente")
+    search_fields = ("moneda", "moneda_base")
     ordering = ("-vigente_desde",)

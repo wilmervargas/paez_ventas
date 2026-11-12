@@ -4,6 +4,8 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
+from apps.common.utils.money import money, to_decimal
+from apps.company.services import get_empresa, get_tasa_del_dia
 from apps.inventory.models import Producto
 
 from .models import Compra, CompraDetalle
@@ -62,6 +64,11 @@ class CompraSerializer(serializers.ModelSerializer):
     puede_editar = serializers.BooleanField(read_only=True)
     puede_recibir = serializers.BooleanField(read_only=True)
     puede_anular = serializers.BooleanField(read_only=True)
+    tasa_bcv = serializers.SerializerMethodField()
+    tasa_bcv_vigente_desde = serializers.SerializerMethodField()
+    total_ves = serializers.SerializerMethodField()
+    total_usd = serializers.SerializerMethodField()
+    adquirida_en = serializers.SerializerMethodField()
 
     moneda = serializers.CharField(required=False, allow_blank=True, max_length=3)
     tasa_cambio = serializers.DecimalField(
@@ -88,6 +95,11 @@ class CompraSerializer(serializers.ModelSerializer):
             "iva",
             "total",
             "total_base",
+            "tasa_bcv",
+            "tasa_bcv_vigente_desde",
+            "total_ves",
+            "total_usd",
+            "adquirida_en",
             "estado",
             "estado_display",
             "notas",
@@ -126,6 +138,97 @@ class CompraSerializer(serializers.ModelSerializer):
         if len(productos) != len(set(productos)):
             raise serializers.ValidationError("No repitas el mismo producto en la compra.")
         return value
+
+    @property
+    def _moneda_base(self) -> str:
+        if not hasattr(self, "_moneda_base_cache"):
+            empresa = get_empresa()
+            self._moneda_base_cache = ((empresa.moneda_base if empresa else "") or "USD").upper()
+        return self._moneda_base_cache
+
+    def _tasa_obj(self, moneda: str, base: str, fecha):
+        """Tasa (objeto) del par para la fecha del documento, cacheada por request."""
+        cache = self.context.setdefault("_tasas_compra", {})
+        clave = (moneda.upper(), base.upper(), fecha)
+        if clave not in cache:
+            cache[clave] = get_tasa_del_dia(moneda, fecha, base=base)
+        return cache[clave]
+
+    def _tasa(self, moneda: str, base: str, fecha):
+        """Valor de la tasa del par para la fecha del documento."""
+        obj = self._tasa_obj(moneda, base, fecha)
+        return obj.tasa if obj else None
+
+    def _total_base_exacto(self, obj: Compra) -> Decimal | None:
+        """Total en moneda base sin redondear, para no arrastrar desvíos."""
+        if obj.moneda.upper() == self._moneda_base:
+            return to_decimal(obj.total)
+        tasa = to_decimal(obj.tasa_cambio)
+        if tasa <= 0:
+            return None
+        return to_decimal(obj.total) / tasa
+
+    def get_tasa_bcv(self, obj: Compra) -> str | None:
+        """Tasa del dólar BCV (Bs por 1 USD) vigente en la fecha del documento."""
+        if obj.tasa_bcv is not None:
+            return f"{obj.tasa_bcv:.6f}"
+        tasa = self._tasa("VES", "USD", obj.fecha)
+        return f"{tasa:.6f}" if tasa is not None else None
+
+    def get_tasa_bcv_vigente_desde(self, obj: Compra) -> str | None:
+        """Fecha y hora en que quedó vigente la tasa BCV usada en el documento."""
+        if obj.tasa_bcv_vigente_desde is not None:
+            return obj.tasa_bcv_vigente_desde.isoformat()
+        tasa_obj = self._tasa_obj("VES", "USD", obj.fecha)
+        if tasa_obj is None or tasa_obj.vigente_desde is None:
+            return None
+        return tasa_obj.vigente_desde.isoformat()
+
+    def get_adquirida_en(self, obj: Compra) -> str | None:
+        """Fecha y hora de recepción definitiva de la compra."""
+        if obj.estado != Compra.Estado.RECIBIDA or obj.updated_at is None:
+            return None
+        return obj.updated_at.isoformat()
+
+    def get_total_usd(self, obj: Compra) -> str | None:
+        """Equivalente del total en dólares (moneda base congelada)."""
+        base_exacto = self._total_base_exacto(obj)
+        if base_exacto is None:
+            return None
+        if self._moneda_base == "USD":
+            return str(money(base_exacto))
+        tasa = self._tasa("USD", self._moneda_base, obj.fecha)
+        if tasa is None:
+            return None
+        return str(money(base_exacto * tasa))
+
+    def get_total_ves(self, obj: Compra) -> str | None:
+        """Equivalente del total en bolívares.
+
+        Si el documento ya está en bolívares se usa su total (no se reinterpreta
+        con otra tasa); si no, se convierte el equivalente en dólares con la tasa
+        BCV congelada en el documento (o la del histórico como respaldo).
+        """
+        if obj.moneda.upper() == "VES":
+            return str(money(obj.total))
+
+        total_usd = self.get_total_usd(obj)
+        tasa_bcv = obj.tasa_bcv if obj.tasa_bcv is not None else self._tasa("VES", "USD", obj.fecha)
+        if total_usd is None or tasa_bcv is None:
+            return None
+
+        # Se recalcula con la precisión completa del equivalente en dólares.
+        base_exacto = self._total_base_exacto(obj)
+        if base_exacto is None:
+            return None
+        if self._moneda_base == "USD":
+            usd_exacto = base_exacto
+        else:
+            tasa_usd = self._tasa("USD", self._moneda_base, obj.fecha)
+            if tasa_usd is None:
+                return None
+            usd_exacto = base_exacto * tasa_usd
+        return str(money(usd_exacto * tasa_bcv))
 
     def validate_moneda(self, value: str) -> str:
         return (value or "").strip().upper()

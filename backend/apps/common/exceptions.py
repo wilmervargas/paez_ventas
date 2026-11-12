@@ -12,6 +12,14 @@ class BusinessRuleError(APIException):
     default_code = "business_rule"
 
 
+class RecursoVinculadoError(APIException):
+    """Intento de eliminar un registro referenciado por otros."""
+
+    status_code = 409
+    default_detail = "El registro está vinculado a otros y no se puede eliminar."
+    default_code = "recurso_vinculado"
+
+
 def api_exception_handler(exc, context):
     """Envuelve los errores en `{detail, code, errors}`."""
     response = exception_handler(exc, context)

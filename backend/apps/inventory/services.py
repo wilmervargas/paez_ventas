@@ -5,8 +5,10 @@ from decimal import ROUND_FLOOR, ROUND_HALF_UP, Decimal
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
+from django.db.models import ProtectedError
 
-from apps.common.exceptions import BusinessRuleError
+from apps.common.exceptions import BusinessRuleError, RecursoVinculadoError
+from apps.common.utils.files import delete_replaced_file
 from apps.common.utils.money import money, to_decimal
 
 from .models import (
@@ -153,11 +155,19 @@ def actualizar_producto(producto: Producto, data: dict, user=None) -> Producto:
     """Actualiza datos del producto. El stock no se toca por esta vía."""
     costo_anterior = producto.costo
     precio_anterior = producto.precio
+    imagen_previa = producto.imagen
+    # `imagen` presente y vacía (`""` o null): el cliente pidió borrarla.
+    quitar_imagen = "imagen" in data and data["imagen"] in (None, "")
+    if quitar_imagen:
+        data["imagen"] = ""
 
     for field, value in data.items():
         setattr(producto, field, value)
     _validar_modelo(producto)
     producto.save()
+
+    # Borra el archivo físico si se quitó la imagen o si se reemplazó.
+    delete_replaced_file(imagen_previa, producto.imagen)
 
     if producto.precio != precio_anterior or producto.costo != costo_anterior:
         logger.info(
@@ -254,6 +264,66 @@ def actualizar_combo(combo: Combo, data: dict, componentes: list[dict] | None, u
         "Catálogo: combo %s actualizado por %s", combo.sku, getattr(user, "email", "sistema")
     )
     return combo
+
+
+def _eliminar_o_vinculado(instance, descripcion: str) -> None:
+    """Elimina el registro o traduce un `ProtectedError` a 409 legible."""
+    try:
+        with transaction.atomic():
+            instance.delete()
+    except ProtectedError as exc:
+        raise RecursoVinculadoError(
+            f"No se pudo eliminar {descripcion}: tiene registros asociados."
+        ) from exc
+
+
+def eliminar_categoria(categoria: CategoriaProducto) -> None:
+    """Elimina físicamente la categoría si ningún producto la usa."""
+    if categoria.productos.exists():
+        raise RecursoVinculadoError(
+            "La categoría tiene productos asociados. Muévelos de categoría o elimínalos primero."
+        )
+    nombre = categoria.nombre
+    _eliminar_o_vinculado(categoria, "la categoría")
+    logger.info("Catálogo: categoría %s eliminada", nombre)
+
+
+def eliminar_unidad(unidad: UnidadMedida) -> None:
+    """Elimina físicamente la unidad si ningún producto la usa."""
+    if unidad.productos.exists():
+        raise RecursoVinculadoError(
+            "La unidad tiene productos asociados. Muévelos de unidad o elimínalos primero."
+        )
+    nombre = unidad.nombre
+    _eliminar_o_vinculado(unidad, "la unidad")
+    logger.info("Catálogo: unidad %s eliminada", nombre)
+
+
+def eliminar_producto(producto: Producto) -> None:
+    """Elimina físicamente el producto si no tiene historial (kardex, compras, combos)."""
+    if producto.movimientos.exists():
+        raise RecursoVinculadoError(
+            "El producto tiene movimientos de inventario y no se puede eliminar."
+        )
+    if producto.compras_detalle.exists():
+        raise RecursoVinculadoError("El producto aparece en compras registradas.")
+    if producto.combos.exists():
+        raise RecursoVinculadoError("El producto es componente de uno o más combos.")
+    sku = producto.sku
+    imagen = producto.imagen
+    nombre_imagen = imagen.name if imagen else ""
+    _eliminar_o_vinculado(producto, "el producto")
+    if nombre_imagen:
+        # El producto ya no existe: su imagen queda huérfana en el storage.
+        imagen.storage.delete(nombre_imagen)
+    logger.info("Catálogo: producto %s eliminado", sku)
+
+
+def eliminar_combo(combo: Combo) -> None:
+    """Elimina físicamente el combo; sus componentes se borran en cascada."""
+    sku = combo.sku
+    _eliminar_o_vinculado(combo, "el combo")
+    logger.info("Catálogo: combo %s eliminado", sku)
 
 
 def seed_inventario() -> None:

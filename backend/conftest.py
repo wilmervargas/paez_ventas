@@ -133,6 +133,20 @@ def producto(db, categoria, unidad):
 
 
 @pytest.fixture
+def cliente(db):
+    from apps.clients.models import Cliente
+
+    return Cliente.objects.create(
+        codigo="CL-00001",
+        nombre="Cliente de Prueba",
+        rif_cedula="V-12345678",
+        telefono="+584141234567",
+        email="cliente@example.com",
+        direccion="Caracas",
+    )
+
+
+@pytest.fixture
 def proveedor(db):
     from apps.clients.models import Proveedor
 

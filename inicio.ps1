@@ -18,14 +18,19 @@ try {
 
     # 2. Validar Backend
     $BackendDir = Join-Path $BaseDir "backend"
-    $VenvActivate = Join-Path $BackendDir ".venv\Scripts\Activate.ps1"
+    # El entorno virtual puede llamarse ".venv" o "venv" según la máquina.
+    $VenvCandidates = @(
+        (Join-Path $BackendDir ".venv\Scripts\Activate.ps1"),
+        (Join-Path $BackendDir "venv\Scripts\Activate.ps1")
+    )
+    $VenvActivate = $VenvCandidates | Where-Object { Test-Path -Path $_ } | Select-Object -First 1
     $ManagePy = Join-Path $BackendDir "manage.py"
 
     if (-not (Test-Path -Path $BackendDir)) {
         throw "La carpeta backend no se encuentra en $BaseDir."
     }
-    if (-not (Test-Path -Path $VenvActivate)) {
-        throw "El entorno virtual no existe en: $VenvActivate."
+    if (-not $VenvActivate) {
+        throw "No se encontró el entorno virtual en backend\.venv ni backend\venv."
     }
     if (-not (Test-Path -Path $ManagePy)) {
         throw "No se encuentra manage.py en el backend."

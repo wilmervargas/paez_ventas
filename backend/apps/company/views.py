@@ -1,5 +1,9 @@
 """Vistas de empresa y tasas de cambio."""
 
+from datetime import datetime
+
+from django.utils import timezone
+from django_filters import rest_framework as filters
 from drf_spectacular.utils import extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -14,8 +18,13 @@ from apps.common.permissions import (
 )
 
 from .models import TasaCambio
-from .serializers import EmpresaSerializer, TasaCambioSerializer
-from .services import get_empresa, get_tasa_vigente, upsert_empresa
+from .serializers import EmpresaSerializer, ResumenTasaSerializer, TasaCambioSerializer
+from .services import (
+    get_empresa,
+    get_resumen_tasas,
+    get_tasa_del_dia,
+    upsert_empresa,
+)
 
 
 class EmpresaView(APIView):
@@ -71,13 +80,23 @@ class EmpresaView(APIView):
         )
 
 
+class TasaCambioFilter(filters.FilterSet):
+    fecha = filters.DateFilter(field_name="vigente_desde", lookup_expr="date")
+    desde = filters.DateFilter(field_name="vigente_desde", lookup_expr="date__gte")
+    hasta = filters.DateFilter(field_name="vigente_desde", lookup_expr="date__lte")
+
+    class Meta:
+        model = TasaCambio
+        fields = ("moneda", "moneda_base", "fuente", "fecha", "desde", "hasta")
+
+
 class TasaCambioViewSet(viewsets.ModelViewSet):
     """Histórico de tasas. Solo el admin puede crear o modificar."""
 
-    queryset = TasaCambio.objects.all()
+    queryset = TasaCambio.objects.select_related("created_by").all()
     serializer_class = TasaCambioSerializer
-    filterset_fields = ("moneda", "fuente")
-    ordering_fields = ("vigente_desde", "tasa")
+    filterset_class = TasaCambioFilter
+    ordering_fields = ("vigente_desde", "tasa", "moneda_base")
     http_method_names = ["get", "post", "put", "patch", "head", "options"]
 
     def get_permissions(self):
@@ -89,10 +108,39 @@ class TasaCambioViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
 
+    @extend_schema(
+        parameters=[
+            {"name": "moneda", "type": "str"},
+            {"name": "base", "type": "str"},
+            {"name": "fecha", "type": "date"},
+        ]
+    )
     @action(detail=False, methods=["get"], url_path="vigente")
     def vigente(self, request):
+        """Tasa aplicable a una fecha (default hoy).
+
+        Si ese día no tiene tasa, se arrastra la última anterior conocida.
+        Si el par no está registrado, se deriva por cruce con el bolívar.
+        """
         moneda = request.query_params.get("moneda", "VES")
-        tasa = get_tasa_vigente(moneda)
+        base = request.query_params.get("base") or None
+        fecha_param = request.query_params.get("fecha")
+
+        fecha = None
+        if fecha_param:
+            try:
+                fecha = datetime.strptime(fecha_param, "%Y-%m-%d").date()
+            except ValueError:
+                return Response(
+                    {
+                        "detail": "La fecha debe tener formato YYYY-MM-DD.",
+                        "code": "fecha_invalida",
+                        "errors": {"fecha": ["Formato inválido."]},
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        tasa = get_tasa_del_dia(moneda, fecha, base=base)
         if tasa is None:
             return Response(
                 {
@@ -103,3 +151,30 @@ class TasaCambioViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
         return Response(self.get_serializer(tasa).data)
+
+    @extend_schema(parameters=[{"name": "fecha", "type": "date"}], responses=ResumenTasaSerializer)
+    @action(detail=False, methods=["get"], url_path="resumen")
+    def resumen(self, request):
+        """Última tasa en bolívares de USD, EUR y USDT para la fecha indicada."""
+        fecha_param = request.query_params.get("fecha")
+        fecha = None
+        if fecha_param:
+            try:
+                fecha = datetime.strptime(fecha_param, "%Y-%m-%d").date()
+            except ValueError:
+                return Response(
+                    {
+                        "detail": "La fecha debe tener formato YYYY-MM-DD.",
+                        "code": "fecha_invalida",
+                        "errors": {"fecha": ["Formato inválido."]},
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        filas = get_resumen_tasas(fecha)
+        return Response(
+            {
+                "fecha": (fecha or timezone.localdate()).isoformat(),
+                "monedas": ResumenTasaSerializer(filas, many=True).data,
+            }
+        )

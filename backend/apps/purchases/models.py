@@ -58,6 +58,18 @@ class Compra(BaseModel):
         decimal_places=2,
         default=Decimal("0.00"),
     )
+    tasa_bcv = models.DecimalField(
+        "tasa BCV del documento",
+        max_digits=18,
+        decimal_places=6,
+        null=True,
+        blank=True,
+    )
+    tasa_bcv_vigente_desde = models.DateTimeField(
+        "vigencia de la tasa BCV",
+        null=True,
+        blank=True,
+    )
     estado = models.CharField(
         "estado",
         max_length=10,

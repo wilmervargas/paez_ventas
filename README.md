@@ -88,6 +88,9 @@ npm run build
 - **Fase 3** completada: compras con numeración anual `COMP-YYYY-000001`,
   recepción atómica con entrada al kardex y costo promedio, anulación con
   reverso de inventario y pantalla de compras con filtros y acciones.
+- **Histórico de tasas:** registro diario del dólar BCV, euro y USDT
+  (`/app/tasas`), con resumen del día y correcciones; la última tasa del día es
+  la que aplican compras y pedidos en bolívares.
 
 Las apps restantes (`orders`, `finances`, `notifications`, `reports`) están
 creadas como esqueleto para las siguientes fases del roadmap en `AGENTS.md`.

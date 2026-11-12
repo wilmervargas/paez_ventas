@@ -60,13 +60,26 @@ class Empresa(BaseModel):
 
 
 class TasaCambio(BaseModel):
-    """Histórico de tasas: unidades de `moneda` por 1 unidad de moneda base."""
+    """Histórico de tasas: 1 unidad de `moneda_base` equivale a `tasa` de `moneda`.
+
+    La forma habitual en Venezuela es cotizar todo en bolívares:
+
+    - Dólar BCV: ``moneda="VES"``, ``moneda_base="USD"``.
+    - Euro BCV: ``moneda="VES"``, ``moneda_base="EUR"``.
+    - USDT: ``moneda="VES"``, ``moneda_base="USDT"``.
+
+    Si `moneda_base` se deja vacía se usa la moneda base de la empresa al
+    momento de guardar, de modo que la tasa conserva su significado si la
+    empresa cambia de moneda base más adelante.
+    """
 
     class Fuente(models.TextChoices):
         BCV = "bcv", "BCV"
+        USDT = "usdt", "USDT"
         MANUAL = "manual", "Manual"
 
-    moneda = models.CharField("moneda", max_length=3, default="VES")
+    moneda = models.CharField("moneda", max_length=4, default="VES")
+    moneda_base = models.CharField("moneda base", max_length=4, blank=True, default="")
     tasa = models.DecimalField("tasa", max_digits=18, decimal_places=6)
     fuente = models.CharField(
         "fuente",
@@ -82,14 +95,38 @@ class TasaCambio(BaseModel):
         ordering = ("-vigente_desde",)
         constraints = [
             models.UniqueConstraint(
-                fields=("moneda", "vigente_desde"),
-                name="unique_tasa_por_moneda_y_fecha",
+                fields=("moneda", "moneda_base", "vigente_desde"),
+                name="unique_tasa_por_par_y_fecha",
             ),
         ]
 
     def __str__(self) -> str:
-        return f"{self.moneda} {self.tasa} ({self.vigente_desde:%Y-%m-%d %H:%M})"
+        return (
+            f"1 {self.moneda_base} = {self.tasa} {self.moneda} "
+            f"({self.vigente_desde:%Y-%m-%d %H:%M})"
+        )
+
+    @property
+    def es_calculada(self) -> bool:
+        """True cuando la tasa se obtuvo por cruce y no está guardada."""
+        return self.pk is None
+
+    def save(self, *args, **kwargs):
+        self.moneda = (self.moneda or "VES").strip().upper()
+        self.moneda_base = (self.moneda_base or "").strip().upper()
+        if not self.moneda_base:
+            empresa = Empresa.objects.filter(pk=1).first()
+            self.moneda_base = ((empresa.moneda_base if empresa else "") or "USD").upper()
+        super().save(*args, **kwargs)
 
     def clean(self):
         if self.tasa is not None and self.tasa <= 0:
             raise ValidationError({"tasa": "La tasa debe ser mayor que cero."})
+        if (
+            self.moneda
+            and self.moneda_base
+            and self.moneda.strip().upper() == self.moneda_base.strip().upper()
+        ):
+            raise ValidationError(
+                {"moneda_base": "La moneda base debe ser distinta de la moneda cotizada."}
+            )

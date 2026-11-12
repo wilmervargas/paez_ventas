@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
+from apps.common.fields import ImagenOpcionalField
 from apps.common.utils.money import money
 
 from .models import (
@@ -22,9 +23,6 @@ from .services import (
     disponibilidad_combo,
     registrar_movimiento,
 )
-
-MAX_IMAGEN_BYTES = 2 * 1024 * 1024
-TIPOS_IMAGEN = {"image/jpeg", "image/png", "image/webp"}
 
 
 def _puede_ver_costos(request) -> bool:
@@ -73,6 +71,7 @@ class ProductoSerializer(serializers.ModelSerializer):
         write_only=True,
         min_value=Decimal("0"),
     )
+    imagen = ImagenOpcionalField(required=False, allow_null=True)
     categoria_nombre = serializers.CharField(source="categoria.nombre", read_only=True)
     unidad_nombre = serializers.CharField(source="unidad.nombre", read_only=True)
     unidad_abreviatura = serializers.CharField(source="unidad.abreviatura", read_only=True)
@@ -141,16 +140,6 @@ class ProductoSerializer(serializers.ModelSerializer):
         value = value.strip()
         if not value:
             raise serializers.ValidationError("El nombre es obligatorio.")
-        return value
-
-    def validate_imagen(self, value):
-        if not value:
-            return value
-        content_type = getattr(value, "content_type", "")
-        if content_type not in TIPOS_IMAGEN:
-            raise serializers.ValidationError("La imagen debe ser PNG, JPG o WEBP.")
-        if value.size > MAX_IMAGEN_BYTES:
-            raise serializers.ValidationError("La imagen no puede superar los 2 MB.")
         return value
 
     def validate(self, attrs):

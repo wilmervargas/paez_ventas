@@ -1,5 +1,7 @@
 """Tests de clientes y proveedores."""
 
+from decimal import Decimal
+
 import pytest
 from django.urls import reverse
 
@@ -76,12 +78,77 @@ def test_almacenista_no_puede_ver_clientes(almacenista_client, empresa):
     assert almacenista_client.get(reverse("cliente-list")).status_code == 403
 
 
-def test_cliente_no_se_elimina(admin_client, empresa):
+def test_cliente_se_elimina_si_no_esta_vinculado(admin_client, empresa):
     creado = admin_client.post(reverse("cliente-list"), CLIENTE_PAYLOAD, format="json")
 
     response = admin_client.delete(reverse("cliente-detail", args=[creado.data["id"]]))
-    assert response.status_code == 405
-    assert Cliente.objects.count() == 1
+    assert response.status_code == 204
+    assert Cliente.objects.count() == 0
+
+
+def test_cliente_con_pedidos_no_se_elimina(admin_client, empresa, cliente, producto):
+    from apps.orders.models import Pedido
+
+    Pedido.objects.create(
+        numero="PED-2026-000001",
+        cliente=cliente,
+        fecha="2026-11-11",
+        moneda="USD",
+        tasa_cambio="1.000000",
+        subtotal=Decimal("100.00"),
+        iva=Decimal("16.00"),
+        total=Decimal("116.00"),
+        total_base=Decimal("116.00"),
+        created_by=None,
+    )
+
+    response = admin_client.delete(reverse("cliente-detail", args=[cliente.id]))
+    assert response.status_code == 409
+    assert response.data["code"] == "recurso_vinculado"
+    assert Cliente.objects.filter(pk=cliente.id).exists()
+
+
+def test_proveedor_se_elimina_si_no_esta_vinculado(admin_client, empresa):
+    proveedor = admin_client.post(
+        reverse("proveedor-list"),
+        {
+            "nombre": "Proveedor Temporal",
+            "rif": "J-11111111-1",
+            "telefono": "0212-5555555",
+        },
+        format="json",
+    )
+
+    response = admin_client.delete(reverse("proveedor-detail", args=[proveedor.data["id"]]))
+    assert response.status_code == 204
+    from apps.clients.models import Proveedor
+
+    assert Proveedor.objects.count() == 0
+
+
+def test_proveedor_con_compras_no_se_elimina(admin_client, empresa, proveedor, producto):
+    from apps.purchases.models import Compra
+
+    Compra.objects.create(
+        numero="COMP-2026-000001",
+        proveedor=proveedor,
+        fecha="2026-11-11",
+        moneda="USD",
+        tasa_cambio="1.000000",
+        subtotal=Decimal("100.00"),
+        iva=Decimal("16.00"),
+        total=Decimal("116.00"),
+        total_base=Decimal("116.00"),
+        estado="borrador",
+        created_by=None,
+    )
+
+    response = admin_client.delete(reverse("proveedor-detail", args=[proveedor.id]))
+    assert response.status_code == 409
+    assert response.data["code"] == "recurso_vinculado"
+    from apps.clients.models import Proveedor
+
+    assert Proveedor.objects.filter(pk=proveedor.id).exists()
 
 
 def test_almacenista_crea_proveedor(almacenista_client, empresa):

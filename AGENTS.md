@@ -112,8 +112,7 @@ paez/
 └── frontend/
     ├── package.json
     ├── tsconfig.json
-    ├── vite.config.ts
-    ├── tailwind.config.js
+    ├── vite.config.ts              # plugin @tailwindcss/vite + proxy /api (Tailwind v4 no usa tailwind.config.js)
     ├── .env.example
     ├── index.html
     └── src/
@@ -133,6 +132,7 @@ paez/
             ├── clients/
             ├── inventory/
             ├── purchases/
+            ├── rates/
             ├── orders/
             ├── finances/
             ├── reports/
@@ -190,16 +190,24 @@ Empresa (singleton, pk=1)
   igtf_rate        default 0.00 (configurable; no aplicar por defecto)
 
 TasaCambio
-  moneda           (ej. VES)
-  tasa             Decimal(18,6)  # unidades de moneda por 1 moneda_base
-  fuente           bcv | manual
+  moneda           moneda cotizada (ej. VES)
+  moneda_base      1 unidad de esta moneda = `tasa` de `moneda` (ej. USD, EUR, USDT)
+  tasa             Decimal(18,6)  # unidades de `moneda` por 1 `moneda_base`
+  fuente           bcv | usdt | manual
   vigente_desde    datetime
   created_by
-  # única tasa vigente por moneda
+  # única tasa por (moneda, moneda_base, vigente_desde)
 ```
 
 - Singleton forzado en el servicio, no solo en el serializer.
 - El `logo` se sirve desde `media/`; `logo_url` externo no se usa.
+- Histórico diario: dólar BCV (`moneda=VES`, `moneda_base=USD`), euro
+  (`moneda_base=EUR`) y USDT (`moneda_base=USDT`, `fuente=usdt`). Se permiten
+  varias tasas por día: la última vigente es la que aplica.
+- Si `moneda_base` se omite, se completa con `Empresa.moneda_base` al guardar
+  (queda congelada para no reinterpretar el histórico si cambia la moneda base).
+- Los pares no registrados (ej. EUR sobre base USD) se derivan por cruce con el
+  bolívar; se marcan con `es_calculada` y no se guardan.
 
 ### 5.3 clients
 
@@ -276,6 +284,7 @@ Compra
   fecha
   moneda, tasa_cambio
   subtotal, iva, total
+  total_base       Decimal(14,2)  # convertido a moneda_base
   estado           borrador | recibida | anulada
   created_by
 
@@ -285,6 +294,12 @@ CompraDetalle
 
 - Al pasar a `recibida`, genera `MovimientoInventario` de tipo `compra` y actualiza stock/costo.
 - Anular una compra recibida exige reverso de stock atómico.
+- **Fecha y tasa quedan congeladas en el documento.** Si el payload no trae
+  `tasa_cambio`, el backend resuelve la del histórico para la **fecha de la
+  compra** (última vigente de ese día) dentro de la misma transacción. Una tasa
+  enviada se respeta como sobrescritura manual y se registra en el log.
+- Por eso el frontend no envía la tasa cuando está en modo automático: evita
+  congelar un valor desactualizado y deja que la rutina del backend decida.
 
 ### 5.6 orders
 
@@ -480,7 +495,8 @@ POST   /auth/change-password/
 
 ```text
 GET/PUT  /company/
-GET/POST /tasas-cambio/
+GET/POST /tasas-cambio/          GET /tasas-cambio/resumen/
+                                 GET /tasas-cambio/vigente/
 
 CRUD /clientes/          CRUD /proveedores/
 CRUD /productos/         CRUD /combos/

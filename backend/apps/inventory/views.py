@@ -29,6 +29,12 @@ from .serializers import (
     ProductoSerializer,
     UnidadMedidaSerializer,
 )
+from .services import (
+    eliminar_categoria,
+    eliminar_combo,
+    eliminar_producto,
+    eliminar_unidad,
+)
 
 
 class CatalogoAccess(RoleBasedAccess):
@@ -60,7 +66,11 @@ class ProductoViewSet(viewsets.ModelViewSet):
     search_fields = ("sku", "nombre")
     ordering_fields = ("sku", "nombre", "precio", "stock", "created_at")
     ordering = ("nombre",)
-    http_method_names = ["get", "post", "put", "patch", "head", "options"]
+    http_method_names = ["get", "post", "put", "patch", "delete", "head", "options"]
+
+    def perform_destroy(self, instance):
+        """Borrado físico solo si el registro no tiene vínculos (409 si los tiene)."""
+        eliminar_producto(instance)
 
     @action(detail=False, methods=["get"], url_path="stock-bajo")
     def stock_bajo(self, request):
@@ -88,7 +98,10 @@ class ComboViewSet(viewsets.ModelViewSet):
     search_fields = ("sku", "nombre")
     ordering_fields = ("sku", "nombre", "precio", "created_at")
     ordering = ("nombre",)
-    http_method_names = ["get", "post", "put", "patch", "head", "options"]
+    http_method_names = ["get", "post", "put", "patch", "delete", "head", "options"]
+
+    def perform_destroy(self, instance):
+        eliminar_combo(instance)
 
 
 class CategoriaProductoViewSet(viewsets.ModelViewSet):
@@ -98,7 +111,10 @@ class CategoriaProductoViewSet(viewsets.ModelViewSet):
     filterset_fields = ("activo",)
     search_fields = ("nombre",)
     ordering = ("nombre",)
-    http_method_names = ["get", "post", "put", "patch", "head", "options"]
+    http_method_names = ["get", "post", "put", "patch", "delete", "head", "options"]
+
+    def perform_destroy(self, instance):
+        eliminar_categoria(instance)
 
 
 class UnidadMedidaViewSet(viewsets.ModelViewSet):
@@ -107,7 +123,10 @@ class UnidadMedidaViewSet(viewsets.ModelViewSet):
     permission_classes = (IsAuthenticatedAndCompanyReady, IsAdminOrReadOnly)
     search_fields = ("nombre", "abreviatura")
     ordering = ("nombre",)
-    http_method_names = ["get", "post", "put", "patch", "head", "options"]
+    http_method_names = ["get", "post", "put", "patch", "delete", "head", "options"]
+
+    def perform_destroy(self, instance):
+        eliminar_unidad(instance)
 
 
 class MovimientoInventarioViewSet(viewsets.ReadOnlyModelViewSet):
