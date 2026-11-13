@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createCliente, createProveedor, listClientes, listProveedores, updateCliente, updateProveedor, } from "./api";
+import { createCliente, createProveedor, deleteCliente, deleteProveedor, listClientes, listProveedores, updateCliente, updateProveedor, } from "./api";
 export const clientsKeys = {
     all: ["clientes"],
     list: (params) => [...clientsKeys.all, "list", params],
@@ -27,6 +27,16 @@ export function useSaveCliente() {
         },
     });
 }
+
+export function useDeleteCliente() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (id) => deleteCliente(id),
+        onSuccess: () => {
+            void queryClient.invalidateQueries({ queryKey: clientsKeys.all });
+        },
+    });
+}
 export function useProveedores(params) {
     return useQuery({
         queryKey: clientsKeys.suppliersList(params),
@@ -43,6 +53,16 @@ export function useSaveProveedor() {
             }
             return createProveedor(args.payload);
         },
+        onSuccess: () => {
+            void queryClient.invalidateQueries({ queryKey: clientsKeys.suppliers });
+        },
+    });
+}
+
+export function useDeleteProveedor() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (id) => deleteProveedor(id),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: clientsKeys.suppliers });
         },

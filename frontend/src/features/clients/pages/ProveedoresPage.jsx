@@ -1,9 +1,10 @@
-import { Pencil, Plus, Power, Search, Truck } from "lucide-react";
+import { Pencil, Plus, Power, Search, Trash2, Truck } from "lucide-react";
 import { useDeferredValue, useState } from "react";
 import { Alert } from "../../../components/ui/Alert";
 import { Badge } from "../../../components/ui/Badge";
 import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
+import { ConfirmDialog } from "../../../components/ui/ConfirmDialog";
 import { EmptyState } from "../../../components/ui/EmptyState";
 import { Input } from "../../../components/ui/Input";
 import { PageHeader } from "../../../components/ui/PageHeader";
@@ -14,7 +15,7 @@ import { useAuth } from "../../../context/auth-context";
 import { getErrorMessage } from "../../../lib/errors";
 import { canManageSuppliers } from "../../../lib/roles";
 import { ProveedorFormModal } from "../components/ProveedorFormModal";
-import { useProveedores, useSaveProveedor } from "../hooks";
+import { useDeleteProveedor, useProveedores, useSaveProveedor } from "../hooks";
 const PAGE_SIZE = 25;
 export function ProveedoresPage() {
     const { user } = useAuth();
@@ -23,6 +24,7 @@ export function ProveedoresPage() {
     const [search, setSearch] = useState("");
     const [estado, setEstado] = useState("todos");
     const [editing, setEditing] = useState(undefined);
+    const [borrando, setBorrando] = useState(null);
     const deferredSearch = useDeferredValue(search);
     const { data, isLoading, isError, error } = useProveedores({
         page,
@@ -32,6 +34,7 @@ export function ProveedoresPage() {
         ordering: "nombre",
     });
     const toggle = useSaveProveedor();
+    const deleteProveedor = useDeleteProveedor();
     async function toggleActivo(proveedor) {
         try {
             await toggle.mutateAsync({
@@ -41,6 +44,18 @@ export function ProveedoresPage() {
         }
         catch {
             // El estado de la mutación muestra el error.
+        }
+    }
+    async function confirmarBorrado() {
+        if (!borrando) {
+            return;
+        }
+        try {
+            await deleteProveedor.mutateAsync(borrando.id);
+            setBorrando(null);
+        }
+        catch {
+            // El error se muestra dentro del diálogo.
         }
     }
     return (<div className="space-y-6">
@@ -113,6 +128,9 @@ export function ProveedoresPage() {
                               <Button variant="ghost" className="px-2 py-1.5 text-xs" onClick={() => void toggleActivo(proveedor)} loading={toggle.isPending} icon={<Power className="h-3.5 w-3.5"/>}>
                                 {proveedor.activo ? "Desactivar" : "Activar"}
                               </Button>
+                              <Button variant="ghost" className="px-2 py-1.5 text-xs text-rose-600 hover:bg-rose-50" onClick={() => setBorrando(proveedor)} aria-label={`Eliminar proveedor ${proveedor.nombre}`} icon={<Trash2 className="h-3.5 w-3.5"/>}>
+                                Eliminar
+                              </Button>
                             </>) : (<span className="text-xs text-slate-400">Solo lectura</span>)}
                         </div>
                       </td>
@@ -129,5 +147,11 @@ export function ProveedoresPage() {
       </Card>
 
       {editing !== undefined ? (<ProveedorFormModal key={editing?.id ?? "nuevo"} proveedor={editing} onClose={() => setEditing(undefined)}/>) : null}
+
+      <ConfirmDialog open={borrando !== null} title="Eliminar proveedor" message={borrando
+            ? `Se eliminará "${borrando.nombre}" (${borrando.codigo}) de forma permanente. Solo es posible si no tiene compras asociadas. Esta acción no se puede deshacer.`
+            : ""} confirmLabel="Eliminar proveedor" loading={deleteProveedor.isPending} error={deleteProveedor.isError
+            ? getErrorMessage(deleteProveedor.error, "No se pudo eliminar el proveedor.")
+            : null} onConfirm={confirmarBorrado} onClose={() => setBorrando(null)}/>
     </div>);
 }

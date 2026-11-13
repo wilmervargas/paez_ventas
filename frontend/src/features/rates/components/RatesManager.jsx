@@ -1,9 +1,10 @@
-import { ArrowRightLeft, Pencil, Plus } from "lucide-react";
+import { ArrowRightLeft, Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Alert } from "../../../components/ui/Alert";
 import { Badge } from "../../../components/ui/Badge";
 import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
+import { ConfirmDialog } from "../../../components/ui/ConfirmDialog";
 import { EmptyState } from "../../../components/ui/EmptyState";
 import { Input } from "../../../components/ui/Input";
 import { PageHeader } from "../../../components/ui/PageHeader";
@@ -16,7 +17,7 @@ import { getErrorMessage } from "../../../lib/errors";
 import { formatRate } from "../../../lib/money";
 import { canManageRates } from "../../../lib/roles";
 import { TasaFormModal } from "./TasaFormModal";
-import { useResumenTasas, useTasas } from "../hooks";
+import { useDeleteTasa, useResumenTasas, useTasas } from "../hooks";
 
 const PAGE_SIZE = 25;
 
@@ -86,6 +87,7 @@ export function RatesManager() {
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
   const [editing, setEditing] = useState(undefined);
+  const [borrando, setBorrando] = useState(null);
   const resumen = useResumenTasas();
   const { data, isLoading, isError, error } = useTasas({
     page,
@@ -97,6 +99,19 @@ export function RatesManager() {
     hasta: hasta || undefined,
     ordering: "-vigente_desde",
   });
+  const deleteTasa = useDeleteTasa();
+
+  async function confirmarBorrado() {
+    if (!borrando) {
+      return;
+    }
+    try {
+      await deleteTasa.mutateAsync(borrando.id);
+      setBorrando(null);
+    } catch {
+      // El error se muestra dentro del diálogo.
+    }
+  }
   const hayFiltros = moneda !== "todas" || fuente !== "todas" || Boolean(desde) || Boolean(hasta);
 
   function limpiarFiltros() {
@@ -240,16 +255,27 @@ export function RatesManager() {
                         {formatDateTime(tasa.created_at)}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex justify-end">
+                        <div className="flex justify-end gap-1">
                           {puedeGestionar ? (
-                            <Button
-                              variant="ghost"
-                              className="px-2 py-1.5 text-xs"
-                              onClick={() => setEditing(tasa)}
-                              icon={<Pencil className="h-3.5 w-3.5" />}
-                            >
-                              Corregir
-                            </Button>
+                            <>
+                              <Button
+                                variant="ghost"
+                                className="px-2 py-1.5 text-xs"
+                                onClick={() => setEditing(tasa)}
+                                icon={<Pencil className="h-3.5 w-3.5" />}
+                              >
+                                Corregir
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                className="px-2 py-1.5 text-xs text-rose-600 hover:bg-rose-50"
+                                onClick={() => setBorrando(tasa)}
+                                aria-label={`Eliminar tasa ${tasa.moneda_base} ${tasa.vigente_desde}`}
+                                icon={<Trash2 className="h-3.5 w-3.5" />}
+                              >
+                                Eliminar
+                              </Button>
+                            </>
                           ) : (
                             <span className="text-xs text-slate-400">Solo lectura</span>
                           )}
@@ -289,6 +315,25 @@ export function RatesManager() {
       {editing !== undefined ? (
         <TasaFormModal key={editing?.id ?? "nueva"} tasa={editing} onClose={() => setEditing(undefined)} />
       ) : null}
+
+      <ConfirmDialog
+        open={borrando !== null}
+        title="Eliminar tasa de cambio"
+        message={
+          borrando
+            ? `Se eliminará la tasa ${MONEDA_LABEL[borrando.moneda_base] ?? borrando.moneda_base} de ${formatRate(borrando.tasa, borrando.moneda)} con vigencia ${formatDateTime(borrando.vigente_desde)}. Los documentos ya registrados conservan su tasa congelada; esta acción no se puede deshacer.`
+            : ""
+        }
+        confirmLabel="Eliminar tasa"
+        loading={deleteTasa.isPending}
+        error={
+          deleteTasa.isError
+            ? getErrorMessage(deleteTasa.error, "No se pudo eliminar la tasa.")
+            : null
+        }
+        onConfirm={confirmarBorrado}
+        onClose={() => setBorrando(null)}
+      />
     </div>
   );
 }

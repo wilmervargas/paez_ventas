@@ -2,7 +2,6 @@ import { X } from "lucide-react";
 import { Badge } from "../../../components/ui/Badge";
 import { Button } from "../../../components/ui/Button";
 import { Modal } from "../../../components/ui/Modal";
-import { useCompany } from "../../../context/company-context";
 import { formatDate, formatDateTime } from "../../../lib/dates";
 import { formatMoney, formatRate } from "../../../lib/money";
 import { formatQuantity } from "../../../lib/numbers";
@@ -15,8 +14,6 @@ const TONES = {
 };
 
 export function PedidoDetailModal({ pedido, onClose }) {
-  const { company } = useCompany();
-  const monedaBase = company?.moneda_base ?? "USD";
 
   return (
     <Modal
@@ -34,10 +31,14 @@ export function PedidoDetailModal({ pedido, onClose }) {
       }
     >
       <div className="space-y-5">
-        <div className="grid gap-3 rounded-xl bg-slate-50 p-4 text-sm sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 rounded-xl bg-slate-50 p-4 text-sm sm:grid-cols-2 xl:grid-cols-5">
           <div>
             <p className="text-xs uppercase tracking-wide text-slate-500">Fecha</p>
             <p className="mt-1 font-semibold text-slate-900">{formatDate(pedido.fecha)}</p>
+          </div>
+          <div>
+            <p className="text-xs uppercase tracking-wide text-slate-500">N.º de pedido</p>
+            <p className="mt-1 font-semibold text-slate-900">{pedido.numero_referencia || "—"}</p>
           </div>
           <div>
             <p className="text-xs uppercase tracking-wide text-slate-500">Estado / pago</p>
@@ -49,20 +50,9 @@ export function PedidoDetailModal({ pedido, onClose }) {
             </div>
           </div>
           <div>
-            <p className="text-xs uppercase tracking-wide text-slate-500">Tasa del documento</p>
-            <p className="mt-1 font-semibold text-slate-900">
-              {pedido.moneda === monedaBase
-                ? `${pedido.moneda} · tasa 1`
-                : `1 ${monedaBase} = ${formatRate(pedido.tasa_cambio, pedido.moneda)}`}
-            </p>
-            {pedido.tasa_bcv ? (
-              <p className="mt-1 text-xs text-slate-500">
-                Tasa BCV: {formatRate(pedido.tasa_bcv)}
-                {pedido.tasa_bcv_vigente_desde
-                  ? ` · ${formatDateTime(pedido.tasa_bcv_vigente_desde)}`
-                  : ""}
-              </p>
-            ) : null}
+            <p className="text-xs uppercase tracking-wide text-slate-500">Moneda / tasa</p>
+            <p className="mt-1 font-semibold text-slate-900">{pedido.moneda}</p>
+            <p className="text-xs text-slate-500">Tasa: {formatRate(pedido.tasa_cambio, pedido.moneda)}</p>
           </div>
           <div>
             <p className="text-xs uppercase tracking-wide text-slate-500">Registrado por</p>
@@ -109,7 +99,10 @@ export function PedidoDetailModal({ pedido, onClose }) {
                       {formatMoney(linea.descuento_linea, pedido.moneda)}
                     </td>
                     <td className="px-4 py-3 text-slate-600">
-                      {formatMoney(linea.iva_linea, pedido.moneda)}
+                      <span className={linea.aplica_iva === false ? "text-slate-400" : ""}>
+                        {formatMoney(linea.iva_linea, pedido.moneda)}
+                      </span>
+                      {linea.aplica_iva === false ? <span className="ml-1 text-xs text-slate-400">(sin IVA)</span> : null}
                     </td>
                     <td className="px-4 py-3 text-right font-semibold text-slate-900">
                       {formatMoney(linea.subtotal, pedido.moneda)}
@@ -140,41 +133,19 @@ export function PedidoDetailModal({ pedido, onClose }) {
               {formatMoney(pedido.iva, pedido.moneda)}
             </span>
           </div>
+          <div className="flex justify-between gap-3 text-slate-600">
+            <span>Otros montos</span>
+            <span className="font-medium text-slate-900">
+              {formatMoney(pedido.otros_montos ?? "0.00", pedido.moneda)}
+            </span>
+          </div>
           <div className="mt-2 flex justify-between gap-3 border-t border-slate-200 pt-2">
             <span className="font-semibold text-slate-900">Total</span>
             <span className="text-base font-bold text-indigo-700">
               {formatMoney(pedido.total, pedido.moneda)}
             </span>
           </div>
-          {pedido.moneda === "VES" ? null : pedido.total_ves ? (
-            <div className="flex justify-between gap-3 border-t border-slate-200 pt-2 text-slate-600">
-              <span>Monto histórico en Bs (BCV)</span>
-              <span className="font-medium text-slate-900">
-                {formatMoney(pedido.total_ves, "VES")}
-              </span>
-            </div>
-          ) : (
-            <div className="border-t border-slate-200 pt-2 text-xs text-amber-700">
-              Monto histórico en Bs no disponible: no hay tasa BCV registrada para{" "}
-              {formatDate(pedido.fecha)}.
-            </div>
-          )}
-          {pedido.moneda !== "USD" && pedido.total_usd ? (
-            <div className="flex justify-between gap-3 text-slate-600">
-              <span>Total en USD BCV</span>
-              <span className="font-medium text-slate-900">
-                {formatMoney(pedido.total_usd, "USD")}
-              </span>
-            </div>
-          ) : null}
-          {pedido.tasa_bcv ? (
-            <p className="pt-1 text-xs text-slate-500">
-              Tasa BCV del documento: {formatRate(pedido.tasa_bcv)}
-              {pedido.tasa_bcv_vigente_desde
-                ? ` · ${formatDateTime(pedido.tasa_bcv_vigente_desde)}`
-                : ""}
-            </p>
-          ) : null}
+
         </div>
 
         {pedido.notas ? (

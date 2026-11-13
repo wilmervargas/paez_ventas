@@ -1,0 +1,3 @@
+En el modulo compras y pedidos vas a hacer lo sigueinte:
+
+1. Cuando seleccione Moneda tasa que ese dato viene de la tabla de registro de la tasa del dia, con ese monto es que se van a calcular las facturas o pedidos o ordenes,, acompanado solamente siempre del monto en BS o VES. Transformado. elimina el campo moneda del documento. eso no va. Y si seleccionas el modo ajuste, ese monto de la tasa lo metemos a mano y le ponemos que es VES o Bs. El total de la factura tiene que grabarse. ese otros montos de factura debe sumarse a la factura total porque eso es un ajuste

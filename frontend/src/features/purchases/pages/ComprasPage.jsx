@@ -11,8 +11,7 @@ import { Pagination } from "../../../components/ui/Pagination";
 import { PageLoader } from "../../../components/ui/Spinner";
 import { Select } from "../../../components/ui/Select";
 import { useAuth } from "../../../context/auth-context";
-import { useCompany } from "../../../context/company-context";
-import { formatDate, formatDateTime } from "../../../lib/dates";
+import { formatDate } from "../../../lib/dates";
 import { getErrorMessage } from "../../../lib/errors";
 import { formatMoney, formatRate } from "../../../lib/money";
 import { canManagePurchases } from "../../../lib/roles";
@@ -31,9 +30,7 @@ const ESTADO_TONES = {
 };
 export function ComprasPage() {
     const { user } = useAuth();
-    const { company } = useCompany();
     const puedeGestionar = canManagePurchases(user?.rol);
-    const monedaBase = company?.moneda_base ?? "USD";
     const [page, setPage] = useState(1);
     const [search, setSearch] = useState("");
     const [estado, setEstado] = useState("todos");
@@ -139,6 +136,9 @@ export function ComprasPage() {
                         <p className="font-mono text-xs font-semibold text-slate-700">
                           {compra.numero}
                         </p>
+                        {compra.numero_referencia ? (
+                          <p className="text-xs text-slate-600">Ref: {compra.numero_referencia}</p>
+                        ) : null}
                         <p className="text-xs text-slate-500">{compra.creado_por ?? "Sistema"}</p>
                       </td>
                       <td className="px-3 py-3">
@@ -149,26 +149,12 @@ export function ComprasPage() {
                       </td>
                       <td className="px-3 py-3 text-slate-600">
                         <p>{formatDate(compra.fecha)}</p>
-                        {compra.moneda !== monedaBase ? (<p className="text-xs text-slate-500">
-                            1 {monedaBase} = {formatRate(compra.tasa_cambio, compra.moneda)}
-                          </p>) : null}
-                        {compra.tasa_bcv ? (<p className="text-xs text-slate-500">
-                            Tasa BCV: {formatRate(compra.tasa_bcv)}
-                            {compra.tasa_bcv_vigente_desde
-                        ? ` · ${formatDateTime(compra.tasa_bcv_vigente_desde)}`
-                        : ""}
-                          </p>) : null}
+                        <p className="text-xs text-slate-500">{compra.moneda} · tasa {formatRate(compra.tasa_cambio, compra.moneda)}</p>
                       </td>
                       <td className="px-3 py-3">
                         <p className="font-semibold text-slate-900">
                           {formatMoney(compra.total, compra.moneda)}
                         </p>
-                        {compra.total_ves ? (<p className="text-xs text-slate-500">
-                            {formatMoney(compra.total_ves, "VES")} · factura en Bs
-                          </p>) : null}
-                        {compra.moneda !== "USD" && compra.total_usd ? (<p className="text-xs text-slate-500">
-                            {formatMoney(compra.total_usd, "USD")} · USD BCV
-                          </p>) : null}
                       </td>
                       <td className="px-3 py-3">
                         <Badge tone={ESTADO_TONES[compra.estado]}>{compra.estado_display}</Badge>

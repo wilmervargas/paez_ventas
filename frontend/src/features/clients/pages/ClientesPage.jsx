@@ -1,9 +1,10 @@
-import { Pencil, Plus, Power, Search, Users } from "lucide-react";
+import { Pencil, Plus, Power, Search, Trash2, Users } from "lucide-react";
 import { useDeferredValue, useState } from "react";
 import { Alert } from "../../../components/ui/Alert";
 import { Badge } from "../../../components/ui/Badge";
 import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
+import { ConfirmDialog } from "../../../components/ui/ConfirmDialog";
 import { EmptyState } from "../../../components/ui/EmptyState";
 import { Input } from "../../../components/ui/Input";
 import { PageHeader } from "../../../components/ui/PageHeader";
@@ -16,7 +17,7 @@ import { getErrorMessage } from "../../../lib/errors";
 import { formatMoney } from "../../../lib/money";
 import { canManageClients } from "../../../lib/roles";
 import { ClienteFormModal } from "../components/ClienteFormModal";
-import { useClientes, useSaveCliente } from "../hooks";
+import { useClientes, useDeleteCliente, useSaveCliente } from "../hooks";
 const PAGE_SIZE = 25;
 export function ClientesPage() {
     const { user } = useAuth();
@@ -27,6 +28,7 @@ export function ClientesPage() {
     const [search, setSearch] = useState("");
     const [estado, setEstado] = useState("todos");
     const [editing, setEditing] = useState(undefined);
+    const [borrando, setBorrando] = useState(null);
     const deferredSearch = useDeferredValue(search);
     const { data, isLoading, isError, error } = useClientes({
         page,
@@ -36,6 +38,7 @@ export function ClientesPage() {
         ordering: "nombre",
     });
     const toggle = useSaveCliente();
+    const deleteCliente = useDeleteCliente();
     async function toggleActivo(cliente) {
         try {
             await toggle.mutateAsync({
@@ -45,6 +48,18 @@ export function ClientesPage() {
         }
         catch {
             // El error se refleja en el estado de la mutación; se evita duplicar alertas.
+        }
+    }
+    async function confirmarBorrado() {
+        if (!borrando) {
+            return;
+        }
+        try {
+            await deleteCliente.mutateAsync(borrando.id);
+            setBorrando(null);
+        }
+        catch {
+            // El error se muestra dentro del diálogo.
         }
     }
     return (<div className="space-y-6">
@@ -119,6 +134,9 @@ export function ClientesPage() {
                               <Button variant="ghost" className="px-2 py-1.5 text-xs" onClick={() => void toggleActivo(cliente)} loading={toggle.isPending} icon={<Power className="h-3.5 w-3.5"/>}>
                                 {cliente.activo ? "Desactivar" : "Activar"}
                               </Button>
+                              <Button variant="ghost" className="px-2 py-1.5 text-xs text-rose-600 hover:bg-rose-50" onClick={() => setBorrando(cliente)} aria-label={`Eliminar cliente ${cliente.nombre}`} icon={<Trash2 className="h-3.5 w-3.5"/>}>
+                                Eliminar
+                              </Button>
                             </>) : (<span className="text-xs text-slate-400">Solo lectura</span>)}
                         </div>
                       </td>
@@ -135,5 +153,11 @@ export function ClientesPage() {
       </Card>
 
       {editing !== undefined ? (<ClienteFormModal key={editing?.id ?? "nuevo"} cliente={editing} onClose={() => setEditing(undefined)}/>) : null}
+
+      <ConfirmDialog open={borrando !== null} title="Eliminar cliente" message={borrando
+            ? `Se eliminará "${borrando.nombre}" (${borrando.codigo}) de forma permanente. Solo es posible si no tiene registros asociados (pedidos, deudas u otros vínculos). Esta acción no se puede deshacer.`
+            : ""} confirmLabel="Eliminar cliente" loading={deleteCliente.isPending} error={deleteCliente.isError
+            ? getErrorMessage(deleteCliente.error, "No se pudo eliminar el cliente.")
+            : null} onConfirm={confirmarBorrado} onClose={() => setBorrando(null)}/>
     </div>);
 }

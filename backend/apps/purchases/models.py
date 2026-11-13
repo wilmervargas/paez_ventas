@@ -77,6 +77,17 @@ class Compra(BaseModel):
         default=Estado.BORRADOR,
         db_index=True,
     )
+    otros_montos = models.DecimalField(
+        "otros montos",
+        max_digits=14,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    numero_referencia = models.CharField(
+        "número de orden/factura",
+        max_length=50,
+        blank=True,
+    )
     notas = models.TextField("notas", blank=True)
     anulado_por = models.ForeignKey(
         "accounts.User",
@@ -117,7 +128,7 @@ class Compra(BaseModel):
         errors = {}
         if self.tasa_cambio is not None and self.tasa_cambio <= 0:
             errors["tasa_cambio"] = "La tasa de cambio debe ser mayor que cero."
-        for campo in ("subtotal", "iva", "total", "total_base"):
+        for campo in ("subtotal", "iva", "total", "total_base", "otros_montos"):
             valor = getattr(self, campo)
             if valor is not None and valor < 0:
                 errors[campo] = "El monto no puede ser negativo."
@@ -146,6 +157,7 @@ class CompraDetalle(BaseModel):
         max_digits=14,
         decimal_places=4,
     )
+    aplica_iva = models.BooleanField("aplica IVA", default=True)
     subtotal = models.DecimalField(
         "subtotal",
         max_digits=14,

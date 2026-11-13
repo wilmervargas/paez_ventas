@@ -78,6 +78,17 @@ class Pedido(BaseModel):
         null=True,
         blank=True,
     )
+    otros_montos = models.DecimalField(
+        "otros montos",
+        max_digits=14,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    numero_referencia = models.CharField(
+        "número de pedido",
+        max_length=50,
+        blank=True,
+    )
     notas = models.TextField("notas", blank=True)
     anulado_por = models.ForeignKey(
         "accounts.User",
@@ -118,7 +129,7 @@ class Pedido(BaseModel):
         errors = {}
         if self.tasa_cambio is not None and self.tasa_cambio <= 0:
             errors["tasa_cambio"] = "La tasa de cambio debe ser mayor que cero."
-        for campo in ("subtotal", "descuento", "iva", "total", "total_base"):
+        for campo in ("subtotal", "descuento", "iva", "total", "total_base", "otros_montos"):
             valor = getattr(self, campo)
             if valor is not None and valor < 0:
                 errors[campo] = "El monto no puede ser negativo."
@@ -158,6 +169,7 @@ class PedidoDetalle(BaseModel):
     descuento_linea = models.DecimalField(
         "descuento línea", max_digits=14, decimal_places=2, default=Decimal("0.00")
     )
+    aplica_iva = models.BooleanField("aplica IVA", default=True)
     iva_linea = models.DecimalField(
         "IVA línea", max_digits=14, decimal_places=2, default=Decimal("0.00")
     )

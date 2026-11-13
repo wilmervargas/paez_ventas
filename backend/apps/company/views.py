@@ -7,7 +7,7 @@ from django_filters import rest_framework as filters
 from drf_spectacular.utils import extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -20,9 +20,12 @@ from apps.common.permissions import (
 from .models import TasaCambio
 from .serializers import EmpresaSerializer, ResumenTasaSerializer, TasaCambioSerializer
 from .services import (
+    ALLOWED_DB_RESET_EMAIL,
+    eliminar_tasa,
     get_empresa,
     get_resumen_tasas,
     get_tasa_del_dia,
+    limpiar_base_datos,
     upsert_empresa,
 )
 
@@ -34,7 +37,9 @@ class EmpresaView(APIView):
 
     def get_permissions(self):
         if self.request.method in ("GET", "HEAD", "OPTIONS"):
-            return [IsAuthenticated()]
+            # Lectura pública para mostrar branding (logo/nombre) en login;
+            # no expone operaciones de escritura.
+            return [AllowAny()]
         # Primer arranque: el admin puede crear la empresa aunque todavía
         # tenga la contraseña temporal. Después de crearla, se exige cambiarla.
         if get_empresa() is None:
@@ -80,6 +85,39 @@ class EmpresaView(APIView):
         )
 
 
+class LimpiarBaseDatosView(APIView):
+    """Acción de mantenimiento: depura datos operativos de la BD."""
+
+    permission_classes = [IsAuthenticatedAndCompanyReady, IsAdmin]
+
+    @extend_schema(request=None, responses={200: dict})
+    def post(self, request):
+        email = (getattr(request.user, "email", "") or "").strip().lower()
+        if email != ALLOWED_DB_RESET_EMAIL:
+            return Response(
+                {
+                    "detail": "No autorizado para ejecutar esta acción.",
+                    "code": "forbidden",
+                    "errors": {},
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        try:
+            deleted = limpiar_base_datos(requested_by=request.user)
+        except PermissionError:
+            return Response(
+                {"detail": "No autorizado para ejecutar esta acción.", "code": "forbidden", "errors": {}},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return Response(
+            {
+                "detail": "Base de datos depurada correctamente.",
+                "deleted": deleted,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
 class TasaCambioFilter(filters.FilterSet):
     fecha = filters.DateFilter(field_name="vigente_desde", lookup_expr="date")
     desde = filters.DateFilter(field_name="vigente_desde", lookup_expr="date__gte")
@@ -91,22 +129,26 @@ class TasaCambioFilter(filters.FilterSet):
 
 
 class TasaCambioViewSet(viewsets.ModelViewSet):
-    """Histórico de tasas. Solo el admin puede crear o modificar."""
+    """Histórico de tasas. Solo el admin puede crear, modificar o eliminar."""
 
     queryset = TasaCambio.objects.select_related("created_by").all()
     serializer_class = TasaCambioSerializer
     filterset_class = TasaCambioFilter
     ordering_fields = ("vigente_desde", "tasa", "moneda_base")
-    http_method_names = ["get", "post", "put", "patch", "head", "options"]
+    http_method_names = ["get", "post", "put", "patch", "delete", "head", "options"]
 
     def get_permissions(self):
-        if self.action in ("create", "update", "partial_update"):
+        if self.action in ("create", "update", "partial_update", "destroy"):
             return [IsAuthenticatedAndCompanyReady(), IsAdmin()]
         # Las acciones de lectura usan el permiso global (incluye el gate fiscal).
         return super().get_permissions()
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
+
+    def perform_destroy(self, instance):
+        """Borrado físico del registro de tasa (solo admin)."""
+        eliminar_tasa(instance)
 
     @extend_schema(
         parameters=[

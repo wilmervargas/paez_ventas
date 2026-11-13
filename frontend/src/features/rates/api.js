@@ -11,6 +11,9 @@ export async function updateTasa(id, payload) {
     const { data } = await api.patch(`/tasas-cambio/${id}/`, payload);
     return data;
 }
+export async function deleteTasa(id) {
+    await api.delete(`/tasas-cambio/${id}/`);
+}
 export async function getResumenTasas(fecha) {
     const { data } = await api.get("/tasas-cambio/resumen/", {
         params: fecha ? { fecha } : undefined,

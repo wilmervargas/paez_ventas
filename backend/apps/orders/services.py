@@ -26,6 +26,8 @@ CAMPOS_PEDIDO = (
     "tasa_cambio",
     "tipo_pago",
     "descuento",
+    "otros_montos",
+    "numero_referencia",
     "notas",
 )
 
@@ -53,6 +55,7 @@ def _normalizar_detalles(detalles: list[dict], iva_rate: Decimal) -> list[dict]:
         cantidad = to_decimal(detalle.get("cantidad"))
         precio_unitario = to_decimal(detalle.get("precio_unitario"))
         descuento_linea = to_decimal(detalle.get("descuento_linea", 0))
+        aplica_iva = detalle.get("aplica_iva", True)
 
         if cantidad <= 0:
             raise BusinessRuleError(
@@ -110,7 +113,12 @@ def _normalizar_detalles(detalles: list[dict], iva_rate: Decimal) -> list[dict]:
         subtotal_linea = money(bruto_linea - descuento_linea)
         if subtotal_linea < 0:
             subtotal_linea = Decimal("0.00")
-        iva_linea = money(subtotal_linea * to_decimal(iva_rate) / Decimal("100"))
+        aplica_iva = bool(aplica_iva)
+        iva_linea = (
+            money(subtotal_linea * to_decimal(iva_rate) / Decimal("100"))
+            if aplica_iva
+            else Decimal("0.00")
+        )
 
         normalizados.append(
             {
@@ -123,6 +131,7 @@ def _normalizar_detalles(detalles: list[dict], iva_rate: Decimal) -> list[dict]:
                     producto.costo if producto is not None else combo.precio
                 ),
                 "descuento_linea": money(descuento_linea),
+                "aplica_iva": aplica_iva,
                 "iva_linea": iva_linea,
                 "subtotal": subtotal_linea,
                 "combo_snapshot": combo_snapshot,
@@ -180,6 +189,12 @@ def crear_pedido(data: dict, detalles: list[dict], user=None) -> Pedido:
     fecha = datos.get("fecha") or timezone.localdate()
     moneda = (datos.get("moneda") or empresa.moneda_base or "USD").upper()
     tasa = _resolver_tasa(moneda, datos.get("tasa_cambio"), empresa, fecha)
+    otros_montos = money(to_decimal(datos.get("otros_montos", 0)))
+    if otros_montos < 0:
+        raise BusinessRuleError("Los otros montos no pueden ser negativos.")
+    datos["otros_montos"] = otros_montos
+    if "numero_referencia" in datos and datos["numero_referencia"] is not None:
+        datos["numero_referencia"] = str(datos["numero_referencia"]).strip()
 
     normalizados = _normalizar_detalles(detalles, empresa.iva_rate)
 
@@ -194,7 +209,7 @@ def crear_pedido(data: dict, detalles: list[dict], user=None) -> Pedido:
     subtotal = money(subtotal)
     iva_total = money(iva_total)
     descuento_total = money(descuento_total)
-    total = money(subtotal + iva_total)
+    total = money(subtotal + iva_total + otros_montos)
 
     # Congela la tasa BCV (Bs por 1 USD) vigente en la fecha del documento.
     tasa_bcv = get_tasa_del_dia("VES", fecha, base="USD")
@@ -207,6 +222,7 @@ def crear_pedido(data: dict, detalles: list[dict], user=None) -> Pedido:
             "subtotal": subtotal,
             "descuento": descuento_total,
             "iva": iva_total,
+            "otros_montos": otros_montos,
             "total": total,
             "total_base": to_base(total, tasa),
             "tasa_bcv": tasa_bcv.tasa if tasa_bcv else None,
@@ -236,6 +252,7 @@ def crear_pedido(data: dict, detalles: list[dict], user=None) -> Pedido:
                 precio_unitario=d["precio_unitario"],
                 costo_unitario=d["costo_unitario"],
                 descuento_linea=d["descuento_linea"],
+                aplica_iva=d.get("aplica_iva", True),
                 iva_linea=d["iva_linea"],
                 subtotal=d["subtotal"],
                 combo_snapshot=d["combo_snapshot"],
@@ -270,6 +287,13 @@ def actualizar_pedido(pedido: Pedido, data: dict, detalles: list[dict] | None, u
     moneda = (datos.get("moneda") or pedido.moneda or empresa.moneda_base or "USD").upper()
     tasa = _resolver_tasa(moneda, datos.get("tasa_cambio"), empresa, fecha)
 
+    otros_montos = money(to_decimal(datos.get("otros_montos", pedido.otros_montos)))
+    if otros_montos < 0:
+        raise BusinessRuleError("Los otros montos no pueden ser negativos.")
+    datos["otros_montos"] = otros_montos
+    if "numero_referencia" in datos and datos["numero_referencia"] is not None:
+        datos["numero_referencia"] = str(datos["numero_referencia"]).strip()
+
     if detalles is None:
         detalles = [
             {
@@ -278,6 +302,7 @@ def actualizar_pedido(pedido: Pedido, data: dict, detalles: list[dict] | None, u
                 "cantidad": d.cantidad,
                 "precio_unitario": d.precio_unitario,
                 "descuento_linea": d.descuento_linea,
+                "aplica_iva": d.aplica_iva,
                 "descripcion": d.descripcion,
             }
             for d in pedido.detalles.select_related("producto", "combo")
@@ -296,7 +321,7 @@ def actualizar_pedido(pedido: Pedido, data: dict, detalles: list[dict] | None, u
     subtotal = money(subtotal)
     iva_total = money(iva_total)
     descuento_total = money(descuento_total)
-    total = money(subtotal + iva_total)
+    total = money(subtotal + iva_total + otros_montos)
 
     for campo, valor in datos.items():
         setattr(pedido, campo, valor)
@@ -308,6 +333,7 @@ def actualizar_pedido(pedido: Pedido, data: dict, detalles: list[dict] | None, u
     pedido.subtotal = subtotal
     pedido.descuento = descuento_total
     pedido.iva = iva_total
+    pedido.otros_montos = otros_montos
     pedido.total = total
     pedido.total_base = to_base(total, tasa)
     pedido.tasa_bcv = tasa_bcv.tasa if tasa_bcv else None
@@ -327,6 +353,7 @@ def actualizar_pedido(pedido: Pedido, data: dict, detalles: list[dict] | None, u
                 precio_unitario=d["precio_unitario"],
                 costo_unitario=d["costo_unitario"],
                 descuento_linea=d["descuento_linea"],
+                aplica_iva=d.get("aplica_iva", True),
                 iva_linea=d["iva_linea"],
                 subtotal=d["subtotal"],
                 combo_snapshot=d["combo_snapshot"],

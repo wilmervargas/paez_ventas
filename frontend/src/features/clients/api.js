@@ -11,6 +11,9 @@ export async function updateCliente(id, payload) {
     const { data } = await api.patch(`/clientes/${id}/`, payload);
     return data;
 }
+export async function deleteCliente(id) {
+    await api.delete(`/clientes/${id}/`);
+}
 export async function listProveedores(params) {
     const { data } = await api.get("/proveedores/", { params });
     return data;
@@ -22,4 +25,7 @@ export async function createProveedor(payload) {
 export async function updateProveedor(id, payload) {
     const { data } = await api.patch(`/proveedores/${id}/`, payload);
     return data;
+}
+export async function deleteProveedor(id) {
+    await api.delete(`/proveedores/${id}/`);
 }

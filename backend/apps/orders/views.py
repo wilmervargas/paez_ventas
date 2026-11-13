@@ -48,7 +48,7 @@ class PedidoViewSet(viewsets.ModelViewSet):
     serializer_class = PedidoSerializer
     permission_classes = (IsAuthenticatedAndCompanyReady, PedidoAccess)
     filterset_class = PedidoFilter
-    search_fields = ("numero", "cliente__nombre", "cliente__codigo", "notas")
+    search_fields = ("numero", "numero_referencia", "cliente__nombre", "cliente__codigo", "notas")
     ordering_fields = ("numero", "fecha", "total", "created_at")
     ordering = ("-fecha", "-numero")
     http_method_names = ["get", "post", "put", "patch", "head", "options"]

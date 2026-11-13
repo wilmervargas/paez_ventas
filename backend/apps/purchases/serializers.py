@@ -24,6 +24,7 @@ class CompraDetalleInputSerializer(serializers.Serializer):
         decimal_places=4,
         min_value=Decimal("0"),
     )
+    aplica_iva = serializers.BooleanField(required=False, default=True)
 
 
 class CompraDetalleSerializer(serializers.ModelSerializer):
@@ -44,6 +45,7 @@ class CompraDetalleSerializer(serializers.ModelSerializer):
             "unidad_abreviatura",
             "cantidad",
             "costo_unitario",
+            "aplica_iva",
             "subtotal",
         )
         read_only_fields = fields
@@ -78,6 +80,16 @@ class CompraSerializer(serializers.ModelSerializer):
         allow_null=True,
         min_value=Decimal("0.000001"),
     )
+    otros_montos = serializers.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        required=False,
+        min_value=Decimal("0.00"),
+        default=Decimal("0.00"),
+    )
+    numero_referencia = serializers.CharField(
+        required=False, allow_blank=True, max_length=50
+    )
     fecha = serializers.DateField(required=False)
 
     class Meta:
@@ -85,6 +97,7 @@ class CompraSerializer(serializers.ModelSerializer):
         fields = (
             "id",
             "numero",
+            "numero_referencia",
             "proveedor",
             "proveedor_nombre",
             "proveedor_codigo",
@@ -92,6 +105,7 @@ class CompraSerializer(serializers.ModelSerializer):
             "moneda",
             "tasa_cambio",
             "subtotal",
+            "otros_montos",
             "iva",
             "total",
             "total_base",
@@ -231,7 +245,10 @@ class CompraSerializer(serializers.ModelSerializer):
         return str(money(usd_exacto * tasa_bcv))
 
     def validate_moneda(self, value: str) -> str:
-        return (value or "").strip().upper()
+        value = (value or "").strip().upper()
+        if value and value not in {"VES", "USD", "EUR", "USDT"}:
+            raise serializers.ValidationError("La moneda debe ser VES, USD, EUR o USDT.")
+        return value
 
     def create(self, validated_data):
         detalles = validated_data.pop("detalles")
@@ -249,6 +266,7 @@ class CompraSerializer(serializers.ModelSerializer):
                     "producto": detalle.producto,
                     "cantidad": detalle.cantidad,
                     "costo_unitario": detalle.costo_unitario,
+                    "aplica_iva": detalle.aplica_iva,
                 }
                 for detalle in instance.detalles.select_related("producto")
             ]

@@ -20,8 +20,7 @@ import { Pagination } from "../../../components/ui/Pagination";
 import { PageLoader } from "../../../components/ui/Spinner";
 import { Select } from "../../../components/ui/Select";
 import { useAuth } from "../../../context/auth-context";
-import { useCompany } from "../../../context/company-context";
-import { formatDate, formatDateTime } from "../../../lib/dates";
+import { formatDate } from "../../../lib/dates";
 import { getErrorMessage } from "../../../lib/errors";
 import { formatMoney, formatRate } from "../../../lib/money";
 import {
@@ -49,8 +48,6 @@ const ESTADO_TONES = {
 
 export function PedidosPage() {
   const { user } = useAuth();
-  const { company } = useCompany();
-  const monedaBase = company?.moneda_base ?? "USD";
   const puedeGestionar = canManageOrders(user?.rol);
   const puedeConfirmar = canConfirmOrders(user?.rol);
   const puedeAnular = canCancelOrders(user?.rol);
@@ -215,6 +212,9 @@ export function PedidosPage() {
                         <p className="font-mono text-xs font-semibold text-slate-700">
                           {pedido.numero}
                         </p>
+                        {pedido.numero_referencia ? (
+                          <p className="text-xs text-slate-600">Ref: {pedido.numero_referencia}</p>
+                        ) : null}
                         <p className="text-xs text-slate-500">{pedido.creado_por ?? "Sistema"}</p>
                       </td>
                       <td className="px-3 py-3">
@@ -226,34 +226,12 @@ export function PedidosPage() {
                       <td className="px-3 py-3 text-slate-600">
                         <p>{formatDate(pedido.fecha)}</p>
                         <p className="text-xs text-slate-500">{pedido.tipo_pago_display}</p>
-                        {pedido.moneda !== monedaBase ? (
-                          <p className="text-xs text-slate-500">
-                            1 {monedaBase} = {formatRate(pedido.tasa_cambio, pedido.moneda)}
-                          </p>
-                        ) : null}
-                        {pedido.tasa_bcv ? (
-                          <p className="text-xs text-slate-500">
-                            Tasa BCV: {formatRate(pedido.tasa_bcv)}
-                            {pedido.tasa_bcv_vigente_desde
-                              ? ` · ${formatDateTime(pedido.tasa_bcv_vigente_desde)}`
-                              : ""}
-                          </p>
-                        ) : null}
+                        <p className="text-xs text-slate-500">{pedido.moneda} · tasa {formatRate(pedido.tasa_cambio, pedido.moneda)}</p>
                       </td>
                       <td className="px-3 py-3">
                         <p className="font-semibold text-slate-900">
                           {formatMoney(pedido.total, pedido.moneda)}
                         </p>
-                        {pedido.total_ves ? (
-                          <p className="text-xs text-slate-500">
-                            {formatMoney(pedido.total_ves, "VES")} · venta en Bs
-                          </p>
-                        ) : null}
-                        {pedido.moneda !== "USD" && pedido.total_usd ? (
-                          <p className="text-xs text-slate-500">
-                            {formatMoney(pedido.total_usd, "USD")} · USD BCV
-                          </p>
-                        ) : null}
                       </td>
                       <td className="px-3 py-3">
                         <Badge tone={ESTADO_TONES[pedido.estado]}>{pedido.estado_display}</Badge>

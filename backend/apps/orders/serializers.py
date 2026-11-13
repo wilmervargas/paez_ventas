@@ -49,6 +49,7 @@ class PedidoDetalleInputSerializer(serializers.Serializer):
         default=Decimal("0.00"),
         min_value=Decimal("0"),
     )
+    aplica_iva = serializers.BooleanField(required=False, default=True)
 
     def validate(self, attrs):
         producto = attrs.get("producto")
@@ -83,6 +84,7 @@ class PedidoDetalleSerializer(serializers.ModelSerializer):
             "precio_unitario",
             "costo_unitario",
             "descuento_linea",
+            "aplica_iva",
             "iva_linea",
             "subtotal",
             "combo_snapshot",
@@ -131,6 +133,16 @@ class PedidoSerializer(serializers.ModelSerializer):
         default=Decimal("0.00"),
         min_value=Decimal("0"),
     )
+    otros_montos = serializers.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        required=False,
+        min_value=Decimal("0.00"),
+        default=Decimal("0.00"),
+    )
+    numero_referencia = serializers.CharField(
+        required=False, allow_blank=True, max_length=50
+    )
     tipo_pago = serializers.ChoiceField(
         choices=Pedido.TipoPago.choices, required=False, default=Pedido.TipoPago.CONTADO
     )
@@ -140,6 +152,7 @@ class PedidoSerializer(serializers.ModelSerializer):
         fields = (
             "id",
             "numero",
+            "numero_referencia",
             "cliente",
             "cliente_nombre",
             "cliente_codigo",
@@ -154,6 +167,7 @@ class PedidoSerializer(serializers.ModelSerializer):
             "tipo_pago_display",
             "subtotal",
             "descuento",
+            "otros_montos",
             "iva",
             "total",
             "total_base",
@@ -277,7 +291,10 @@ class PedidoSerializer(serializers.ModelSerializer):
         return value
 
     def validate_moneda(self, value: str) -> str:
-        return (value or "").strip().upper()
+        value = (value or "").strip().upper()
+        if value and value not in {"VES", "USD", "EUR", "USDT"}:
+            raise serializers.ValidationError("La moneda debe ser VES, USD, EUR o USDT.")
+        return value
 
     def create(self, validated_data):
         detalles = validated_data.pop("detalles")
@@ -297,6 +314,7 @@ class PedidoSerializer(serializers.ModelSerializer):
                     "cantidad": d.cantidad,
                     "precio_unitario": d.precio_unitario,
                     "descuento_linea": d.descuento_linea,
+                    "aplica_iva": d.aplica_iva,
                     "descripcion": d.descripcion,
                 }
                 for d in instance.detalles.select_related("producto", "combo")

@@ -1,30 +1,42 @@
-import { Building2, CheckCircle2, Coins, Percent } from "lucide-react";
-import { Card } from "../../components/ui/Card";
+import { useQueryClient } from "@tanstack/react-query";
+import { Database } from "lucide-react";
+import { useState } from "react";
+import { Alert } from "../../components/ui/Alert";
+import { Button } from "../../components/ui/Button";
+import { Card, CardBody, CardHeader } from "../../components/ui/Card";
+import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
 import { useAuth } from "../../context/auth-context";
-import { useCompany } from "../../context/company-context";
-import { ROLE_LABELS } from "../../lib/roles";
+import { api } from "../../lib/api";
+import { getErrorMessage } from "../../lib/errors";
 import { RatesManager } from "../rates/components/RatesManager";
 
-function Stat({ title, value, icon: Icon }) {
-  return (
-    <Card className="p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{title}</p>
-          <p className="mt-2 text-lg font-semibold text-slate-900">{value}</p>
-        </div>
-        <div className="grid h-10 w-10 place-items-center rounded-xl bg-slate-100 text-slate-600">
-          <Icon className="h-5 w-5" />
-        </div>
-      </div>
-    </Card>
-  );
-}
+const DB_RESET_EMAIL = "wilmere.vargas@gmail.com";
 
 export function DashboardPage() {
   const { user } = useAuth();
-  const { company } = useCompany();
+  const queryClient = useQueryClient();
   const firstName = user?.nombre.split(/\s+/)[0] ?? "";
+  const canResetDb = (user?.email || "").toLowerCase() === DB_RESET_EMAIL;
+  const [showDbReset, setShowDbReset] = useState(false);
+  const [dbResetLoading, setDbResetLoading] = useState(false);
+  const [dbResetError, setDbResetError] = useState(null);
+  const [dbResetSuccess, setDbResetSuccess] = useState(null);
+
+  const handleDbReset = async () => {
+    setDbResetError(null);
+    setDbResetLoading(true);
+    try {
+      const { data } = await api.post("/company/limpiar-base-datos/");
+      await queryClient.invalidateQueries();
+      setShowDbReset(false);
+      setDbResetSuccess(data?.detail || "Base de datos depurada correctamente. Se conservaron empresa, tasas de cambio y catálogos (categorías/unidades).");
+    } catch (err) {
+      setDbResetError(getErrorMessage(err, "No se pudo limpiar la base de datos."));
+    } finally {
+      setDbResetLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <section className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-900 p-6 text-white shadow-lg sm:p-8">
@@ -33,37 +45,58 @@ export function DashboardPage() {
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">
             Panel principal
           </p>
-          <h1 className="mt-2 text-2xl font-bold sm:text-3xl">Hola, {firstName}</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-300">
-            La base del sistema está lista. Desde aquí administrarás clientes, inventario,
-            pedidos y cobranzas de la empresa.
-          </p>
-          <div className="mt-5 flex flex-wrap gap-2 text-xs">
-            <span className="rounded-full bg-white/10 px-3 py-1 font-medium">
-              {user ? ROLE_LABELS[user.rol] : ""}
-            </span>
-            <span className="rounded-full bg-white/10 px-3 py-1 font-medium">
-              {company?.nombre_comercial || company?.razon_social || "Empresa sin configurar"}
-            </span>
-            <span className="rounded-full bg-emerald-500/20 px-3 py-1 font-medium text-emerald-200">
-              Sesión activa
-            </span>
-          </div>
+          <h1 className="mt-2 text-xl font-semibold sm:text-2xl">Hola, {firstName}</h1>
         </div>
       </section>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat title="Moneda base" value={company?.moneda_base ?? "—"} icon={Coins} />
-        <Stat title="IVA" value={company ? `${company.iva_rate}%` : "—"} icon={Percent} />
-        <Stat title="RIF" value={company?.rif ?? "—"} icon={Building2} />
-        <Stat
-          title="Configuración"
-          value={company ? "Completa" : "Pendiente"}
-          icon={CheckCircle2}
-        />
-      </div>
-
       <RatesManager />
+
+      {canResetDb ? (
+        <Card>
+          <CardHeader
+            title="Sistema"
+            description="Acciones de mantenimiento del sistema. Disponibles solo para el usuario autorizado."
+          />
+          <CardBody className="space-y-4">
+            {dbResetSuccess ? <Alert tone="success">{dbResetSuccess}</Alert> : null}
+            <Alert tone="warning">
+              <strong>Limpiar base de datos:</strong> elimina todos los registros excepto{" "}
+              <strong>empresa</strong>, <strong>tasas de cambio</strong> y <strong>catálogos</strong>{" "}
+              (categorías y unidades). Se conserva tu usuario autorizado. Acción irreversible, pensada para depuración y arranque en limpio.
+            </Alert>
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                variant="danger"
+                icon={<Database className="h-4 w-4" />}
+                onClick={() => {
+                  setDbResetError(null);
+                  setShowDbReset(true);
+                }}
+              >
+                Limpiar base de datos
+              </Button>
+            </div>
+          </CardBody>
+        </Card>
+      ) : null}
+
+      <ConfirmDialog
+        open={showDbReset}
+        title="Limpiar base de datos"
+        message="¿Seguro que deseas limpiar la base de datos? Se eliminarán clientes, proveedores, productos/combos, inventario, compras, pedidos, finanzas, secuencias y demás registros, conservando solo empresa, tasas de cambio y catálogos (categorías/unidades). Esta acción no se puede deshacer."
+        confirmLabel="Sí, limpiar base de datos"
+        cancelLabel="Cancelar"
+        loading={dbResetLoading}
+        error={dbResetError}
+        onConfirm={handleDbReset}
+        onClose={() => {
+          if (!dbResetLoading) {
+            setShowDbReset(false);
+            setDbResetError(null);
+          }
+        }}
+      />
     </div>
   );
 }

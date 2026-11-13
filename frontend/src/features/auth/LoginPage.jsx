@@ -1,5 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowRight, ShieldCheck } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -9,6 +9,7 @@ import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
 import { FullPageLoader } from "../../components/ui/Spinner";
 import { useAuth } from "../../context/auth-context";
+import { api } from "../../lib/api";
 import { getErrorMessage } from "../../lib/errors";
 const schema = z.object({
     email: z.string().min(1, "Ingresa tu correo").email("Correo inválido"),
@@ -19,6 +20,7 @@ export function LoginPage() {
     const navigate = useNavigate();
     const location = useLocation();
     const [error, setError] = useState(null);
+    const [company, setCompany] = useState(null);
     const state = location.state;
     const from = state?.from?.pathname ?? "/app";
     const { register, handleSubmit, formState: { errors, isSubmitting }, } = useForm({
@@ -30,6 +32,26 @@ export function LoginPage() {
             navigate(from, { replace: true });
         }
     }, [status, navigate, from]);
+    useEffect(() => {
+        let cancelled = false;
+        async function loadCompany() {
+            try {
+                const { data } = await api.get("/company/");
+                if (!cancelled) {
+                    setCompany(data);
+                }
+            }
+            catch {
+                if (!cancelled) {
+                    setCompany(null);
+                }
+            }
+        }
+        void loadCompany();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
     const onSubmit = handleSubmit(async (values) => {
         setError(null);
         try {
@@ -49,33 +71,23 @@ export function LoginPage() {
         <div className="absolute -right-24 -top-24 h-72 w-72 rounded-full bg-indigo-500/30 blur-3xl"/>
         <div className="absolute -bottom-24 -left-24 h-72 w-72 rounded-full bg-emerald-500/10 blur-3xl"/>
 
-        <div className="relative flex items-center gap-3">
-          <div className="grid h-11 w-11 place-items-center rounded-2xl bg-indigo-500 text-lg font-bold">
-            GC
-          </div>
-          <div>
-            <p className="text-base font-semibold">Gestión</p>
-            <p className="text-xs text-slate-400">Comercial</p>
-          </div>
-        </div>
-
-        <div className="relative max-w-lg">
-          <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">
-            Sistema interno
-          </p>
-          <h1 className="text-3xl font-bold leading-tight sm:text-4xl">
+        <div className="relative flex flex-1 flex-col items-center justify-center gap-8 text-center">
+          {company?.logo_url ? (
+            <div className="flex h-44 w-44 items-center justify-center overflow-hidden rounded-full bg-white/10 p-4 shadow-lg ring-1 ring-white/10 sm:h-56 sm:w-56 lg:h-64 lg:w-64">
+              <img
+                src={company.logo_url}
+                alt={`Logo de ${company.nombre_comercial || company.razon_social || "la empresa"}`}
+                className="h-full w-full scale-110 object-cover"
+              />
+            </div>
+          ) : (
+            <div className="grid h-44 w-44 place-items-center overflow-hidden rounded-full bg-white/10 text-5xl font-bold text-white shadow-lg ring-1 ring-white/10 sm:h-56 sm:w-56 lg:h-64 lg:w-64">
+              {(company?.nombre_comercial || company?.razon_social || "GC").slice(0, 2).toUpperCase()}
+            </div>
+          )}
+          <h1 className="text-3xl font-bold leading-tight sm:text-4xl lg:text-5xl">
             Cobros, inventario y ventas.
           </h1>
-          <p className="mt-4 text-sm leading-relaxed text-slate-300">
-            Control de clientes, productos, pedidos y cuentas por cobrar con
-            trazabilidad completa y recordatorios de pago por WhatsApp.
-          </p>
-          <div className="mt-8 grid grid-cols-2 gap-3 text-sm">
-            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-              <ShieldCheck className="mb-2 h-5 w-5 text-emerald-400"/>
-              Acceso seguro por roles
-            </div>
-          </div>
         </div>
 
         <p className="relative text-xs text-slate-500">
@@ -87,13 +99,24 @@ export function LoginPage() {
         <div className="w-full max-w-md">
           <div className="mb-8 lg:hidden">
             <div className="flex items-center gap-3">
-              <div className="grid h-10 w-10 place-items-center rounded-xl bg-indigo-600 text-sm font-bold text-white">
-                P
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-slate-900">Gestión</p>
-                <p className="text-xs text-slate-500">Comercial</p>
-              </div>
+              {company?.logo_url ? (
+                <img
+                  src={company.logo_url}
+                  alt={`Logo de ${company.nombre_comercial || company.razon_social || "la empresa"}`}
+                  className="h-12 w-auto max-w-[180px] object-contain"
+                />
+              ) : (
+                <>
+                  <div className="grid h-10 w-10 place-items-center rounded-xl bg-indigo-600 text-sm font-bold text-white">
+                    {(company?.nombre_comercial || company?.razon_social || "GC").slice(0, 2).toUpperCase()}
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">
+                      {company?.nombre_comercial || company?.razon_social || "Gestión Comercial"}
+                    </p>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 

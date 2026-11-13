@@ -42,7 +42,7 @@ class CompraViewSet(viewsets.ModelViewSet):
     serializer_class = CompraSerializer
     permission_classes = (IsAuthenticatedAndCompanyReady, CompraAccess)
     filterset_class = CompraFilter
-    search_fields = ("numero", "proveedor__nombre", "proveedor__rif", "notas")
+    search_fields = ("numero", "numero_referencia", "proveedor__nombre", "proveedor__rif", "notas")
     ordering_fields = ("numero", "fecha", "total", "created_at")
     ordering = ("-fecha", "-numero")
     http_method_names = ["get", "post", "put", "patch", "head", "options"]

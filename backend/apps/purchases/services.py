@@ -18,7 +18,15 @@ from .models import Compra, CompraDetalle
 
 logger = logging.getLogger("auditoria")
 
-CAMPOS_COMPRA = ("proveedor", "fecha", "moneda", "tasa_cambio", "notas")
+CAMPOS_COMPRA = (
+    "proveedor",
+    "fecha",
+    "moneda",
+    "tasa_cambio",
+    "otros_montos",
+    "numero_referencia",
+    "notas",
+)
 
 
 def _validar_modelo(instance) -> None:
@@ -38,6 +46,7 @@ def _normalizar_detalles(detalles: list[dict]) -> list[dict]:
         producto = detalle["producto"]
         cantidad = to_decimal(detalle["cantidad"])
         costo_unitario = to_decimal(detalle["costo_unitario"])
+        aplica_iva = detalle.get("aplica_iva", True)
 
         if cantidad <= 0:
             raise BusinessRuleError("La cantidad de cada línea debe ser mayor que cero.")
@@ -52,6 +61,7 @@ def _normalizar_detalles(detalles: list[dict]) -> list[dict]:
                 "producto": producto,
                 "cantidad": cantidad,
                 "costo_unitario": costo_unitario,
+                "aplica_iva": bool(aplica_iva),
             }
         )
     return normalizados
@@ -94,14 +104,21 @@ def _resolver_tasa(moneda: str, tasa_cambio, empresa, fecha=None) -> Decimal:
     return tasa
 
 
-def _calcular_totales(detalles: list[dict], iva_rate) -> tuple[Decimal, Decimal, Decimal]:
+def _calcular_totales(
+    detalles: list[dict], iva_rate, otros_montos: Decimal
+) -> tuple[Decimal, Decimal, Decimal]:
     subtotal = Decimal("0.00")
+    base_iva = Decimal("0.00")
     for detalle in detalles:
         detalle["subtotal"] = money(detalle["cantidad"] * detalle["costo_unitario"])
         subtotal += detalle["subtotal"]
+        if detalle.get("aplica_iva", True):
+            base_iva += detalle["subtotal"]
     subtotal = money(subtotal)
-    iva = money(subtotal * to_decimal(iva_rate) / Decimal("100"))
-    total = money(subtotal + iva)
+    base_iva = money(base_iva)
+    iva = money(base_iva * to_decimal(iva_rate) / Decimal("100"))
+    otros_montos = money(otros_montos)
+    total = money(subtotal + iva + otros_montos)
     return subtotal, iva, total
 
 
@@ -110,13 +127,19 @@ def _preparar_datos(data: dict, empresa, detalles: list[dict]) -> dict:
     fecha = datos.get("fecha") or timezone.localdate()
     moneda = (datos.get("moneda") or empresa.moneda_base or "USD").upper()
     tasa = _resolver_tasa(moneda, datos.get("tasa_cambio"), empresa, fecha)
+    otros_montos = money(to_decimal(datos.get("otros_montos", 0)))
+    if otros_montos < 0:
+        raise BusinessRuleError("Los otros montos no pueden ser negativos.")
+    datos["otros_montos"] = otros_montos
+    if "numero_referencia" in datos and datos["numero_referencia"] is not None:
+        datos["numero_referencia"] = str(datos["numero_referencia"]).strip()
 
     # Congela la tasa BCV (Bs por 1 USD) vigente en la fecha del documento para
     # poder mostrar equivalentes históricos aunque el registro de tasas cambie.
     tasa_bcv = get_tasa_del_dia("VES", fecha, base="USD")
 
     normalizados = _normalizar_detalles(detalles)
-    subtotal, iva, total = _calcular_totales(normalizados, empresa.iva_rate)
+    subtotal, iva, total = _calcular_totales(normalizados, empresa.iva_rate, otros_montos)
 
     datos.update(
         {
@@ -142,6 +165,7 @@ def _guardar_detalles(compra: Compra, detalles: list[dict], user=None) -> None:
                 producto=detalle["producto"],
                 cantidad=detalle["cantidad"],
                 costo_unitario=detalle["costo_unitario"],
+                aplica_iva=detalle.get("aplica_iva", True),
                 subtotal=detalle["subtotal"],
                 created_by=user if user and user.is_authenticated else None,
             )
