@@ -5,14 +5,31 @@
  * existen para no usar `number` en operaciones monetarias.
  */
 function parseDecimal(value) {
-    const trimmed = (value ?? "").trim();
-    const match = /^(\d+)(?:\.(\d+))?$/.exec(trimmed);
+    const trimmed = String(value ?? "").trim();
+    if (!trimmed) {
+        return { digits: 0n, scale: 0 };
+    }
+    // Acepta coma o punto como separador decimal (formato VE y API).
+    // Si hay ambos, el último se considera separador decimal.
+    let normalized = trimmed;
+    const lastComma = normalized.lastIndexOf(",");
+    const lastDot = normalized.lastIndexOf(".");
+    if (lastComma !== -1 || lastDot !== -1) {
+        const decSep = lastComma > lastDot ? "," : ".";
+        const thouSep = decSep === "," ? "." : ",";
+        normalized = normalized.split(thouSep).join("");
+        if (decSep === ",") {
+            normalized = normalized.replace(",", ".");
+        }
+    }
+    const match = /^(-)?(\d+)(?:\.(\d+))?$/.exec(normalized);
     if (!match) {
         return { digits: 0n, scale: 0 };
     }
-    const fraction = match[2] ?? "";
+    const sign = match[1] ? -1n : 1n;
+    const fraction = match[3] ?? "";
     return {
-        digits: BigInt(`${match[1]}${fraction}`),
+        digits: sign * BigInt(`${match[2]}${fraction}`),
         scale: fraction.length,
     };
 }
@@ -32,7 +49,7 @@ function quantize(digits, scale, decimalPlaces) {
     const rounded = remainder * 2n >= divisor ? quotient + 1n : quotient;
     return { digits: rounded, scale: decimalPlaces };
 }
-function formatParsed(value) {
+function formatParsed(value, decimalSeparator = ".") {
     const negative = value.digits < 0n;
     const absolute = negative ? -value.digits : value.digits;
     const padded = absolute.toString().padStart(value.scale + 1, "0");
@@ -41,7 +58,41 @@ function formatParsed(value) {
     }
     const integer = padded.slice(0, -value.scale);
     const fraction = padded.slice(-value.scale);
-    return `${negative ? "-" : ""}${integer}.${fraction}`;
+    return `${negative ? "-" : ""}${integer}${decimalSeparator}${fraction}`;
+}
+
+/** Convierte un decimal (punto o coma) al formato API con punto. */
+export function toApiDecimal(value, decimalPlaces) {
+    if (value === null || value === undefined || value === "") return "";
+    const parsed = parseDecimal(value);
+    const q = decimalPlaces != null ? quantize(parsed.digits, parsed.scale, decimalPlaces) : parsed;
+    return formatParsed(q, ".");
+}
+
+/** Convierte un decimal con punto (API) a coma para mostrar en pantalla. */
+export function toDisplayDecimal(value, decimalPlaces) {
+    if (value === null || value === undefined || value === "") return "";
+    const parsed = parseDecimal(value);
+    const q = decimalPlaces != null ? quantize(parsed.digits, parsed.scale, decimalPlaces) : parsed;
+    return formatParsed(q, ",");
+}
+
+/**
+ * Formatea un decimal para inputs usando separador de miles (.) y coma decimal,
+ * estilo es-VE. Ej.: "1234.5" -> "1.234,50" (con 2 decimales).
+ */
+export function formatInputDecimal(value, decimalPlaces = 2) {
+    if (value === null || value === undefined || value === "") return "";
+    const parsed = parseDecimal(value);
+    const q = decimalPlaces != null ? quantize(parsed.digits, parsed.scale, decimalPlaces) : parsed;
+    const negative = q.digits < 0n;
+    const absolute = negative ? -q.digits : q.digits;
+    const padded = absolute.toString().padStart(q.scale + 1, "0");
+    const integerRaw = q.scale === 0 ? padded : padded.slice(0, -q.scale);
+    const fraction = q.scale === 0 ? "" : padded.slice(-q.scale);
+    const integer = integerRaw.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+    if (q.scale === 0) return `${negative ? "-" : ""}${integer}`;
+    return `${negative ? "-" : ""}${integer},${fraction}`;
 }
 /** Suma montos expresados como string y redondea a `decimalPlaces`. */
 export function addDecimals(values, decimalPlaces = 2) {

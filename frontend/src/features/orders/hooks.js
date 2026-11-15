@@ -43,10 +43,12 @@ export function useSavePedido() {
 export function useConfirmarPedido() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id) => confirmarPedido(id),
+    mutationFn: ({ id, ...payload }) => confirmarPedido(id, payload),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ordersKeys.all });
       void queryClient.invalidateQueries({ queryKey: inventoryKeys.all });
+      void queryClient.invalidateQueries({ queryKey: ["deudores-pendientes"] });
+      void queryClient.invalidateQueries({ queryKey: ["deudas"] });
     },
   });
 }

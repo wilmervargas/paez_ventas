@@ -10,6 +10,9 @@ export function canManageCompany(rol) {
 export function isAdmin(rol) {
     return rol === "admin";
 }
+export function isSuperUser(user) {
+    return Boolean(user?.is_superuser);
+}
 export function canViewClients(rol) {
     return rol === "admin" || rol === "vendedor" || rol === "cobrador";
 }
@@ -55,6 +58,21 @@ export function canCancelOrders(rol) {
 }
 export function canDeliverOrders(rol) {
     return rol === "admin" || rol === "vendedor" || rol === "almacenista";
+}
+export function canViewFinances(rol) {
+    return rol === "admin" || rol === "vendedor" || rol === "cobrador";
+}
+export function canManagePayments(rol) {
+    return rol === "admin" || rol === "cobrador";
+}
+export function canManageCaja(rol) {
+    return rol === "admin" || rol === "cobrador";
+}
+export function canCancelPayments(rol) {
+    return rol === "admin";
+}
+export function canViewReports(rol) {
+    return rol === "admin" || rol === "vendedor" || rol === "cobrador" || rol === "almacenista";
 }
 export function initials(nombre) {
     return nombre

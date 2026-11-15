@@ -28,6 +28,17 @@ const ESTADO_TONES = {
     recibida: "success",
     anulada: "neutral",
 };
+
+function tasaLabelCompra(compra) {
+    const esAjuste = compra.moneda === "VES" && Number(compra.tasa_cambio || "0") === 1;
+    if (esAjuste) return "Ajuste (Bs)";
+    const tasaDoc = Number(compra.tasa_cambio || 0);
+    const tasaBcv = Number(compra.tasa_bcv ?? 0);
+    if (Number.isFinite(tasaBcv) && tasaBcv > 0 && Math.abs(tasaDoc - tasaBcv) < 0.000001) {
+        return `BCV USD · ${formatRate(compra.tasa_cambio)}`;
+    }
+    return `${formatRate(compra.tasa_cambio)} · tasa doc.`;
+}
 export function ComprasPage() {
     const { user } = useAuth();
     const puedeGestionar = canManagePurchases(user?.rol);
@@ -74,7 +85,7 @@ export function ComprasPage() {
 
       <Card>
         <div className="grid gap-3 border-b border-slate-100 p-4 sm:grid-cols-2 xl:grid-cols-5">
-          <div className="sm:col-span-2">
+          <div className="sm:col-span-2 xl:col-span-1">
             <Input label="Buscar" placeholder="Número, proveedor, RIF o notas" value={search} onChange={(event) => {
             setSearch(event.target.value);
             setPage(1);
@@ -98,7 +109,7 @@ export function ComprasPage() {
                 {item.codigo} · {item.nombre}
               </option>))}
           </Select>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3 xl:col-span-2">
             <Input label="Desde" type="date" value={fechaDesde} onChange={(event) => {
             setFechaDesde(event.target.value);
             setPage(1);
@@ -149,7 +160,7 @@ export function ComprasPage() {
                       </td>
                       <td className="px-3 py-3 text-slate-600">
                         <p>{formatDate(compra.fecha)}</p>
-                        <p className="text-xs text-slate-500">{compra.moneda} · tasa {formatRate(compra.tasa_cambio, compra.moneda)}</p>
+                        <p className="text-xs text-slate-500">{compra.moneda} · {tasaLabelCompra(compra)}</p>
                       </td>
                       <td className="px-3 py-3">
                         <p className="font-semibold text-slate-900">

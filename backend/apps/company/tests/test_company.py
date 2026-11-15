@@ -53,6 +53,7 @@ def test_admin_configura_empresa_y_se_libera_el_gate(admin_client, auth_client):
     assert response.status_code == 201
     assert Empresa.objects.count() == 1
     assert response.data["rif"] == "J-12345678-9"
+    assert response.data["telefono"] == "584141234567"
     assert response.data["moneda_base"] == "USD"
 
     assert auth_client.get(reverse("empresa")).status_code == 200

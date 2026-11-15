@@ -5,12 +5,38 @@ import { Modal } from "../../../components/ui/Modal";
 import { formatDate, formatDateTime } from "../../../lib/dates";
 import { formatMoney, formatRate } from "../../../lib/money";
 import { formatQuantity } from "../../../lib/numbers";
+import { useTasaVigente } from "../hooks";
 const TONES = {
     borrador: "warning",
     recibida: "success",
     anulada: "neutral",
 };
+
+function describeTasaCompra(compra, tasaEur, tasaUsdt) {
+    const esAjuste = compra.moneda === "VES" && Number(compra.tasa_cambio || "0") === 1;
+    if (esAjuste) return "Ajuste (Bs)";
+    const tasaDoc = Number(compra.tasa_cambio || 0);
+    const tasaBcv = Number(compra.tasa_bcv ?? 0);
+    if (Number.isFinite(tasaBcv) && tasaBcv > 0 && Math.abs(tasaDoc - tasaBcv) < 0.000001) {
+        return `${formatRate(compra.tasa_cambio)} (Dólar BCV, por 1 USD)`;
+    }
+    if (tasaEur && Math.abs(tasaDoc - Number(tasaEur)) < 0.000001) {
+        return `${formatRate(compra.tasa_cambio)} (Euro BCV, por 1 EUR)`;
+    }
+    if (tasaUsdt && Math.abs(tasaDoc - Number(tasaUsdt)) < 0.000001) {
+        return `${formatRate(compra.tasa_cambio)} (USDT, por 1 USDT)`;
+    }
+    return `${formatRate(compra.tasa_cambio)} (tasa aplicada, Bs)`;
+}
+
 export function CompraDetailModal({ compra, onClose }) {
+    const esAjuste = compra.moneda === "VES" && Number(compra.tasa_cambio || "0") === 1;
+    const coincideBcv = !esAjuste && Number(compra.tasa_bcv ?? 0) > 0 && Math.abs(Number(compra.tasa_cambio || 0) - Number(compra.tasa_bcv)) < 0.000001;
+    const necesitaInferir = !esAjuste && !coincideBcv;
+    const tasaEurDoc = useTasaVigente("VES", "EUR", necesitaInferir ? compra.fecha : "");
+    const tasaUsdtDoc = useTasaVigente("VES", "USDT", necesitaInferir ? compra.fecha : "");
+    const tasaLabel = describeTasaCompra(compra, tasaEurDoc.data?.tasa, tasaUsdtDoc.data?.tasa);
+
     return (<Modal open onClose={onClose} size="xl" title={`Compra ${compra.numero}`} description={`${compra.proveedor_codigo} · ${compra.proveedor_nombre}`} footer={<div className="flex justify-end">
           <Button type="button" variant="secondary" onClick={onClose} icon={<X className="h-4 w-4"/>}>
             Cerrar
@@ -35,7 +61,7 @@ export function CompraDetailModal({ compra, onClose }) {
           <div>
             <p className="text-xs uppercase tracking-wide text-slate-500">Moneda / tasa</p>
             <p className="mt-1 font-semibold text-slate-900">{compra.moneda}</p>
-            <p className="text-xs text-slate-500">Tasa: {formatRate(compra.tasa_cambio, compra.moneda)}</p>
+            <p className="text-xs text-slate-500">Tasa: {tasaLabel}</p>
           </div>
           <div>
             <p className="text-xs uppercase tracking-wide text-slate-500">Registrada por</p>
@@ -98,7 +124,7 @@ export function CompraDetailModal({ compra, onClose }) {
           <div className="flex justify-between gap-3 text-slate-600">
             <span>Otros montos</span>
             <span className="font-medium text-slate-900">
-              {formatMoney(compra.otros_montos ?? "0.00", compra.moneda)}
+              {formatMoney(compra.otros_montos ?? "0,00", compra.moneda)}
             </span>
           </div>
           <div className="mt-2 flex justify-between gap-3 border-t border-slate-200 pt-2">

@@ -31,10 +31,32 @@ function refreshOnce() {
     }
     return refreshPromise;
 }
+function normalizeDecimalCommas(value) {
+    if (Array.isArray(value)) return value.map(normalizeDecimalCommas);
+    if (value && typeof value === "object" && !(value instanceof FormData) && !(value instanceof Blob)) {
+        const out = {};
+        for (const [k, v] of Object.entries(value)) out[k] = normalizeDecimalCommas(v);
+        return out;
+    }
+    if (typeof value === "string") {
+        const s = value.trim();
+        // Convierte formatos VE a punto decimal para la API.
+        // "123,45" -> "123.45"; "1.234,56" -> "1234.56"
+        if (/^-?\d{1,3}(?:\.\d{3})*,\d+$/.test(s)) {
+            return s.replace(/\./g, "").replace(",", ".");
+        }
+        if (/^-?\d+,\d+$/.test(s)) return s.replace(",", ".");
+    }
+    return value;
+}
+
 api.interceptors.request.use((config) => {
     const token = tokenStore.get();
     if (token) {
         config.headers.set("Authorization", `Bearer ${token}`);
+    }
+    if (config.data && typeof config.data === "object") {
+        config.data = normalizeDecimalCommas(config.data);
     }
     return config;
 });

@@ -1,15 +1,20 @@
 import { api } from "../../lib/api";
+function nd(v) {
+    if (v == null || v === "") return v;
+    const s = String(v).trim();
+    return /^-?\d+,\d+$/.test(s) ? s.replace(",", ".") : s;
+}
 function buildProductoFormData(payload) {
     const form = new FormData();
     form.append("sku", String(payload.sku ?? ""));
     form.append("nombre", String(payload.nombre ?? ""));
     form.append("categoria", String(payload.categoria));
     form.append("unidad", String(payload.unidad));
-    form.append("costo", String(payload.costo ?? "0.00"));
-    form.append("precio", String(payload.precio ?? "0.00"));
-    form.append("stock_minimo", String(payload.stock_minimo ?? "0.000"));
+    form.append("costo", nd(payload.costo ?? "0.00"));
+    form.append("precio", nd(payload.precio ?? "0.00"));
+    form.append("stock_minimo", nd(payload.stock_minimo ?? "0.000"));
     if (payload.stock_inicial !== undefined) {
-        form.append("stock_inicial", payload.stock_inicial);
+        form.append("stock_inicial", nd(payload.stock_inicial));
     }
     form.append("iva_aplicable", payload.iva_aplicable ? "true" : "false");
     form.append("activo", payload.activo ? "true" : "false");

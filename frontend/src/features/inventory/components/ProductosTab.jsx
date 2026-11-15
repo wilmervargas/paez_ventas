@@ -1,4 +1,4 @@
-import { History, Package, Pencil, Plus, Search, SlidersHorizontal, Trash2 } from "lucide-react";
+import { History, Pencil, Plus, Search, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useDeferredValue, useState } from "react";
 import { Alert } from "../../../components/ui/Alert";
 import { Badge } from "../../../components/ui/Badge";
@@ -100,30 +100,24 @@ export function ProductosTab({ onVerKardex }) {
               <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                 <tr>
                   <th className="px-4 py-3 font-semibold">SKU</th>
-                  <th className="px-4 py-3 font-semibold">Producto</th>
+                  <th className="min-w-[15.5rem] w-[15.5rem] px-4 py-3 font-semibold">Producto</th>
                   <th className="px-4 py-3 font-semibold">Categoría</th>
                   <th className="px-4 py-3 font-semibold">Precio</th>
                   {verCostos ? <th className="px-4 py-3 font-semibold">Costo</th> : null}
-                  {verCostos ? <th className="px-4 py-3 font-semibold">Margen</th> : null}
                   <th className="px-4 py-3 font-semibold">Stock</th>
-                  <th className="px-4 py-3 font-semibold">Estado</th>
-                  <th className="px-4 py-3 text-right font-semibold">Acciones</th>
+                  <th className="pl-4 pr-0 py-3 font-semibold">Estado</th>
+                  <th className="whitespace-nowrap pl-0 pr-4 py-3 text-right font-semibold">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {data.results.map((producto) => (<tr key={producto.id} className="hover:bg-slate-50/70">
-                    <td className="px-4 py-3 font-mono text-xs text-slate-500">{producto.sku}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        {producto.imagen_url ? (<img src={producto.imagen_url} alt="" className="h-9 w-9 rounded-lg border border-slate-200 object-contain"/>) : (<div className="grid h-9 w-9 place-items-center rounded-lg bg-slate-100 text-slate-400">
-                            <Package className="h-4 w-4"/>
-                          </div>)}
-                        <div>
-                          <p className="font-semibold text-slate-900">{producto.nombre}</p>
-                          <p className="text-xs text-slate-500">
-                            {producto.unidad_nombre} ({producto.unidad_abreviatura})
-                          </p>
-                        </div>
+                {data.results.map((producto) => (<tr key={producto.id} className={producto.activo ? "bg-emerald-50/60 hover:bg-emerald-100/60" : "bg-rose-50 hover:bg-rose-100/70"}>
+                    <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-500">{producto.sku}</td>
+                    <td className="min-w-[15.5rem] w-[15.5rem] px-4 py-3">
+                      <div>
+                        <p className="text-[12px] font-semibold text-slate-900">{producto.nombre}</p>
+                        <p className="text-xs text-slate-500">
+                          {producto.unidad_nombre} ({producto.unidad_abreviatura})
+                        </p>
                       </div>
                     </td>
                     <td className="px-4 py-3 text-slate-600">{producto.categoria_nombre}</td>
@@ -132,9 +126,6 @@ export function ProductosTab({ onVerKardex }) {
                     </td>
                     {verCostos ? (<td className="px-4 py-3 text-slate-600">
                         {producto.costo ? formatMoney(producto.costo, moneda) : "—"}
-                      </td>) : null}
-                    {verCostos ? (<td className="px-4 py-3 text-slate-600">
-                        {producto.margen ? formatMoney(producto.margen, moneda) : "—"}
                       </td>) : null}
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
@@ -147,25 +138,21 @@ export function ProductosTab({ onVerKardex }) {
                         Mín. {formatQuantity(producto.stock_minimo)}
                       </p>
                     </td>
-                    <td className="px-4 py-3">
-                      <Badge tone={producto.activo ? "success" : "neutral"}>
+                    <td className="py-3 pl-4 pr-0">
+                      <Badge tone={producto.activo ? "success" : "danger"} className="-mr-3 px-2 py-0.5">
                         {producto.activo ? "Activo" : "Inactivo"}
                       </Badge>
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-1">
-                        {gestiona ? (<Button variant="ghost" className="px-2 py-1.5 text-xs" onClick={() => setEditing(producto)} icon={<Pencil className="h-3.5 w-3.5"/>}>
-                            Editar
-                          </Button>) : null}
-                        {ajusta ? (<Button variant="ghost" className="px-2 py-1.5 text-xs" onClick={() => setAdjusting(producto)} icon={<SlidersHorizontal className="h-3.5 w-3.5"/>}>
+                    <td className="whitespace-nowrap py-3 pl-0 pr-4">
+                      <div className="-ml-3 flex items-center justify-end gap-0">
+                        {ajusta ? (<Button variant="ghost" className="-mr-3 px-0 py-1 text-xs" onClick={() => setAdjusting(producto)} icon={<SlidersHorizontal className="h-3.5 w-3.5"/>}>
                             Ajustar
                           </Button>) : null}
-                        <Button variant="ghost" className="px-2 py-1.5 text-xs" onClick={() => onVerKardex(producto.id)} icon={<History className="h-3.5 w-3.5"/>}>
+                        <Button variant="ghost" className="px-0 py-1 text-xs" onClick={() => onVerKardex(producto.id)} icon={<History className="h-3.5 w-3.5"/>}>
                           Kardex
                         </Button>
-                        {gestiona ? (<Button variant="ghost" className="px-2 py-1.5 text-xs text-rose-600 hover:bg-rose-50" onClick={() => setBorrando(producto)} aria-label={`Eliminar producto ${producto.nombre}`} icon={<Trash2 className="h-3.5 w-3.5"/>}>
-                            Eliminar
-                          </Button>) : null}
+                        {gestiona ? (<Button variant="ghost" className="p-0" onClick={() => setEditing(producto)} title="Editar" aria-label={`Editar producto ${producto.nombre}`} icon={<Pencil className="h-4 w-4"/>} />) : null}
+                        {gestiona ? (<Button variant="ghost" className="-ml-5 p-0 text-rose-600 hover:bg-rose-50" onClick={() => setBorrando(producto)} title="Eliminar" aria-label={`Eliminar producto ${producto.nombre}`} icon={<Trash2 className="h-4 w-4"/>} />) : null}
                       </div>
                     </td>
                   </tr>))}

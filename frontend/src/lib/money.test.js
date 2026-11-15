@@ -9,11 +9,11 @@ describe("formatMoney", () => {
     });
 });
 describe("formatRate", () => {
-    it("formatea una tasa en bolívares", () => {
+    it("formatea una tasa en bolívares con 2 decimales", () => {
         expect(formatRate("40.5")).toBe("Bs 40,50");
     });
-    it("conserva hasta 4 decimales", () => {
-        expect(formatRate("0.909091")).toBe("Bs 0,9091");
+    it("redondea y muestra siempre 2 decimales", () => {
+        expect(formatRate("0.909091")).toBe("Bs 0,91");
     });
     it("devuelve un guion cuando no hay tasa", () => {
         expect(formatRate(null)).toBe("—");

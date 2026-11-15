@@ -69,7 +69,7 @@ class PedidoViewSet(viewsets.ModelViewSet):
     def confirmar(self, request, pk=None):
         pedido = self.get_object()
         serializer = ConfirmarPedidoSerializer(
-            data={}, context={"request": request, "pedido": pedido}
+            data=request.data, context={"request": request, "pedido": pedido}
         )
         serializer.is_valid(raise_exception=True)
         pedido = serializer.save()

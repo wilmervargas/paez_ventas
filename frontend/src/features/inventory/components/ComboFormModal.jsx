@@ -8,6 +8,7 @@ import { Button } from "../../../components/ui/Button";
 import { Input } from "../../../components/ui/Input";
 import { Modal } from "../../../components/ui/Modal";
 import { Select } from "../../../components/ui/Select";
+import { toApiDecimal, toDisplayDecimal } from "../../../lib/decimal";
 import { getErrorMessage } from "../../../lib/errors";
 import { formatQuantity } from "../../../lib/numbers";
 import { useSaveCombo } from "../hooks";
@@ -16,8 +17,8 @@ const componenteSchema = z.object({
     cantidad: z
         .string()
         .trim()
-        .regex(/^\d{1,11}(\.\d{1,3})?$/, "Usa hasta 3 decimales")
-        .refine((value) => Number(value) > 0, "La cantidad debe ser mayor que cero"),
+        .regex(/^\d{1,11}([.,]\d{1,2})?$/, "Usa una cantidad con coma decimal y hasta 2 decimales")
+        .refine((value) => Number(String(value).replace(",", ".")) > 0, "La cantidad debe ser mayor que cero"),
 });
 const schema = z
     .object({
@@ -26,7 +27,7 @@ const schema = z
     precio: z
         .string()
         .trim()
-        .regex(/^\d{1,12}(\.\d{1,2})?$/, "Usa un monto con hasta 2 decimales"),
+        .regex(/^\d{1,12}([.,]\d{1,2})?$/, "Usa un monto con coma decimal y hasta 2 decimales"),
     activo: z.boolean(),
     componentes: z.array(componenteSchema).min(1, "Agrega al menos un componente"),
 })
@@ -44,14 +45,14 @@ function toDefaults(combo) {
     return {
         sku: combo?.sku ?? "",
         nombre: combo?.nombre ?? "",
-        precio: combo?.precio ?? "0.00",
+        precio: combo?.precio ? toDisplayDecimal(combo.precio, 2) : "0,00",
         activo: combo?.activo ?? true,
         componentes: combo && combo.detalle.length > 0
             ? combo.detalle.map((detalle) => ({
                 producto: String(detalle.producto.id),
-                cantidad: detalle.cantidad,
+                cantidad: toDisplayDecimal(detalle.cantidad, 2),
             }))
-            : [{ producto: "", cantidad: "1.000" }],
+            : [{ producto: "", cantidad: "1,00" }],
     };
 }
 export function ComboFormModal({ combo, productos, onClose, }) {
@@ -68,11 +69,11 @@ export function ComboFormModal({ combo, productos, onClose, }) {
             const payload = {
                 sku: values.sku,
                 nombre: values.nombre,
-                precio: values.precio,
+                precio: toApiDecimal(values.precio, 2),
                 activo: values.activo,
                 componentes: values.componentes.map((componente) => ({
                     producto: Number(componente.producto),
-                    cantidad: componente.cantidad,
+                    cantidad: toApiDecimal(componente.cantidad, 2),
                 })),
             };
             if (combo) {
@@ -107,7 +108,7 @@ export function ComboFormModal({ combo, productos, onClose, }) {
         <div className="grid gap-4 sm:grid-cols-2">
           <Input label="SKU *" placeholder="COMBO-001" error={errors.sku?.message} {...register("sku")}/>
           <Input label="Nombre *" placeholder="Nombre del combo" error={errors.nombre?.message} {...register("nombre")}/>
-          <Input label="Precio del combo" inputMode="decimal" placeholder="0.00" error={errors.precio?.message} {...register("precio")}/>
+          <Input label="Precio del combo" inputMode="decimal" placeholder="0,00" error={errors.precio?.message} {...register("precio")}/>
           <label className="flex items-center gap-2 self-end pb-3 text-sm font-medium text-slate-700">
             <input type="checkbox" className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" {...register("activo")}/>
             Combo activo
@@ -120,7 +121,7 @@ export function ComboFormModal({ combo, productos, onClose, }) {
               <p className="text-sm font-semibold text-slate-900">Componentes</p>
               <p className="text-xs text-slate-500">Cantidad de cada producto incluida en el combo.</p>
             </div>
-            <Button type="button" variant="secondary" className="px-2.5 py-1.5 text-xs" onClick={() => append({ producto: "", cantidad: "1.000" })} icon={<Plus className="h-3.5 w-3.5"/>}>
+            <Button type="button" variant="secondary" className="px-2.5 py-1.5 text-xs" onClick={() => append({ producto: "", cantidad: "1,00" })} icon={<Plus className="h-3.5 w-3.5"/>}>
               Agregar
             </Button>
           </div>
@@ -136,7 +137,7 @@ export function ComboFormModal({ combo, productos, onClose, }) {
                       {producto.unidad_abreviatura})
                     </option>))}
                 </Select>
-                <Input label="Cantidad" inputMode="decimal" placeholder="1.000" error={errors.componentes?.[index]?.cantidad?.message} {...register(`componentes.${index}.cantidad`)}/>
+                <Input label="Cantidad" inputMode="decimal" placeholder="1,00" error={errors.componentes?.[index]?.cantidad?.message} {...register(`componentes.${index}.cantidad`)}/>
                 <Button type="button" variant="ghost" className="mt-0.5 px-2 py-2.5 text-rose-600 hover:bg-rose-50 sm:mt-7" onClick={() => remove(index)} disabled={fields.length === 1} aria-label={`Quitar componente ${index + 1}`} icon={<Trash2 className="h-4 w-4"/>}>
                   <span className="sr-only">Quitar</span>
                 </Button>

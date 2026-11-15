@@ -7,7 +7,16 @@ from django.contrib.auth.forms import ReadOnlyPasswordHashField
 from django.contrib.auth.models import BaseUserManager
 from django.contrib.auth.password_validation import validate_password
 
+from apps.common.utils.phone import phone_digits
+
 from .models import User, UserEmailAdicional
+
+
+class PhoneNormalizationMixin:
+    """Guarda el teléfono solo con dígitos (sin el signo '+')."""
+
+    def clean_telefono(self):
+        return phone_digits(self.cleaned_data.get("telefono"))
 
 
 class EmailNormalizationMixin:
@@ -25,7 +34,7 @@ class EmailNormalizationMixin:
         return email
 
 
-class UserCreationForm(EmailNormalizationMixin, forms.ModelForm):
+class UserCreationForm(PhoneNormalizationMixin, EmailNormalizationMixin, forms.ModelForm):
     """Alta de usuarios desde el admin con la política de contraseñas del proyecto."""
 
     password1 = forms.CharField(label="Contraseña", widget=forms.PasswordInput)
@@ -71,7 +80,7 @@ class UserCreationForm(EmailNormalizationMixin, forms.ModelForm):
         return user
 
 
-class UserChangeForm(EmailNormalizationMixin, forms.ModelForm):
+class UserChangeForm(PhoneNormalizationMixin, EmailNormalizationMixin, forms.ModelForm):
     password = ReadOnlyPasswordHashField(label="Contraseña")
 
     class Meta:

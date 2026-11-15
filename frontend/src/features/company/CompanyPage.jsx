@@ -51,11 +51,9 @@ function toFormValues(company) {
         eslogan: company?.eslogan ?? "",
         moneda_base: company?.moneda_base ?? "USD",
         iva_rate: company?.iva_rate ?? "16.00",
-        igtf_rate: company?.igtf_rate ?? "0.00",
+        igtf_rate: company?.igtf_rate ?? "0,00",
     };
 }
-const DB_RESET_EMAIL = "wilmere.vargas@gmail.com";
-
 export function CompanyPage() {
     const { user } = useAuth();
     const { company, isLoading } = useCompany();
@@ -67,7 +65,7 @@ export function CompanyPage() {
     const [showDbReset, setShowDbReset] = useState(false);
     const [dbResetLoading, setDbResetLoading] = useState(false);
     const [dbResetError, setDbResetError] = useState(null);
-    const canResetDb = (user?.email || "").toLowerCase() === DB_RESET_EMAIL;
+    const canResetDb = Boolean(user?.is_superuser);
     const { register, handleSubmit, reset, formState: { errors, isSubmitting }, } = useForm({
         resolver: zodResolver(schema),
         defaultValues: toFormValues(company),
@@ -168,7 +166,7 @@ export function CompanyPage() {
               <Input label="Nombre comercial" placeholder="Nombre de fantasía" error={errors.nombre_comercial?.message} {...register("nombre_comercial")}/>
               <Input label="RIF *" placeholder="J-12345678-9" error={errors.rif?.message} {...register("rif")}/>
               <Input label="Representante" placeholder="Nombre y apellido" error={errors.representante?.message} {...register("representante")}/>
-              <Input label="Teléfono" placeholder="+58 414 1234567" error={errors.telefono?.message} {...register("telefono")}/>
+              <Input label="Teléfono" placeholder="584141234567" error={errors.telefono?.message} {...register("telefono")}/>
               <Input label="Correo electrónico" type="email" placeholder="contacto@empresa.com" error={errors.email?.message} {...register("email")}/>
             </div>
 
@@ -178,8 +176,8 @@ export function CompanyPage() {
 
             <div className="grid gap-4 sm:grid-cols-3">
               <Input label="Moneda base" placeholder="USD" maxLength={3} className="uppercase" error={errors.moneda_base?.message} {...register("moneda_base")}/>
-              <Input label="IVA (%)" inputMode="decimal" placeholder="16.00" error={errors.iva_rate?.message} {...register("iva_rate")}/>
-              <Input label="IGTF (%)" inputMode="decimal" placeholder="0.00" error={errors.igtf_rate?.message} {...register("igtf_rate")}/>
+              <Input label="IVA (%)" inputMode="decimal" placeholder="16,00" error={errors.iva_rate?.message} {...register("iva_rate")}/>
+              <Input label="IGTF (%)" inputMode="decimal" placeholder="0,00" error={errors.igtf_rate?.message} {...register("igtf_rate")}/>
             </div>
 
             <div className="flex justify-end border-t border-slate-100 pt-5">
@@ -208,7 +206,7 @@ export function CompanyPage() {
       <ConfirmDialog
         open={showDbReset}
         title="Limpiar base de datos"
-        message="¿Seguro que deseas limpiar la base de datos? Se eliminarán clientes, proveedores, productos/combos, inventario, compras, pedidos, finanzas, secuencias y demás registros, conservando solo empresa, tasas de cambio y catálogos (categorías/unidades). Esta acción no se puede deshacer."
+        message="¿Seguro que deseas limpiar la base de datos? Se eliminarán clientes, proveedores, productos/combos, inventario, compras, pedidos, finanzas (deudas, cuotas, pagos y caja), secuencias, sesiones y demás registros operativos, conservando solo empresa, tasas de cambio, categorías, unidades de medida y usuarios. Esta acción no se puede deshacer."
         confirmLabel="Sí, limpiar base de datos"
         cancelLabel="Cancelar"
         loading={dbResetLoading}

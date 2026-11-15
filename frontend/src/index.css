@@ -7,6 +7,14 @@
 @layer base {
   html {
     @apply antialiased;
+    /* Móvil/browse: -2pt, pantallas normales (escritorio): -1pt */
+    font-size: calc(16px - 2pt);
+  }
+
+  @media (min-width: 1024px) {
+    html {
+      font-size: calc(16px - 1pt);
+    }
   }
 
   body {
@@ -15,5 +23,34 @@
 
   * {
     @apply border-slate-200;
+  }
+
+  /* Encabezados y pies: mantener tamaño original */
+  h1 {
+    font-size: 24px;
+    line-height: 1.25;
+  }
+
+  h2 {
+    font-size: 16px;
+    line-height: 1.5;
+  }
+
+  h3 {
+    font-size: 16px;
+    line-height: 1.5;
+  }
+
+  th {
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  header {
+    font-size: 16px;
+  }
+
+  footer {
+    font-size: 16px;
   }
 }

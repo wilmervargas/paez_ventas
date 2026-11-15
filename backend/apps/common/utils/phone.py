@@ -1,4 +1,4 @@
-"""Normalización de teléfonos a formato E.164."""
+"""Normalización de teléfonos a formato internacional sin el signo '+'."""
 
 import re
 
@@ -8,11 +8,14 @@ COUNTRY_CODES = {
 
 
 def normalize_phone(value: str, default_country: str = "VE") -> str:
-    """Devuelve el teléfono en formato E.164 o cadena vacía si no es válido.
+    """Devuelve el teléfono internacional solo con dígitos (sin '+').
 
-    Ejemplos (VE): 0414-1234567 -> +584141234567
-                   584141234567 -> +584141234567
-                   +58 414 1234567 -> +584141234567
+    Ejemplos (VE): 0414-1234567  -> 584141234567
+                   584141234567  -> 584141234567
+                   +58 414 1234567 -> 584141234567
+
+    El signo '+' se acepta como entrada, pero nunca se devuelve: los datos
+    guardados, mostrados y enviados usan solo dígitos.
     """
     if not value:
         return ""
@@ -35,11 +38,14 @@ def normalize_phone(value: str, default_country: str = "VE") -> str:
         # Venezuela: 10 dígitos nacionales (3 de operadora + 7).
         if len(national) != 10:
             return ""
-        return f"+{country_code}{national}"
+        return f"{country_code}{national}"
 
-    if not digits.startswith("+"):
-        return ""
-    return f"+{digits}"
+    return digits
+
+
+def phone_digits(value: str) -> str:
+    """Devuelve solo los dígitos del teléfono (para enlaces y APIs)."""
+    return re.sub(r"\D", "", str(value or ""))
 
 
 def is_valid_phone(value: str, default_country: str = "VE") -> bool:

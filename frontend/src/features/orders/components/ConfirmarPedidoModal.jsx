@@ -11,10 +11,13 @@ export function ConfirmarPedidoModal({ pedido, onClose }) {
   const [error, setError] = useState(null);
   const mutation = useConfirmarPedido();
 
+  const cuotas = Number(pedido.numero_cuotas || 1);
+  const esCredito = pedido.tipo_pago === "credito";
+
   async function confirmar() {
     setError(null);
     try {
-      await mutation.mutateAsync(pedido.id);
+      await mutation.mutateAsync({ id: pedido.id });
       onClose();
     } catch (err) {
       setError(getErrorMessage(err, "No se pudo confirmar el pedido."));
@@ -50,10 +53,10 @@ export function ConfirmarPedidoModal({ pedido, onClose }) {
       ) : null}
 
       <Alert tone="info">
-        Al confirmar se descontará el inventario de las líneas del pedido.
-        {pedido.tipo_pago === "credito"
-          ? " Al ser un pedido a crédito, se generará la deuda correspondiente según la configuración del sistema."
-          : " Este pedido es de contado."}{" "}
+        Al confirmar se descontará el inventario de las líneas del pedido.{" "}
+        {esCredito
+          ? `Al ser un pedido a crédito, se generará la deuda correspondiente con ${cuotas} ${cuotas === 1 ? "cuota" : "cuotas"}.`
+          : "Este pedido es de contado (1 cuota)."}{" "}
         Un pedido confirmado no se edita: para corregirlo debe anularse y crearse uno nuevo.
       </Alert>
 

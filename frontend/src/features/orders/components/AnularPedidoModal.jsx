@@ -8,6 +8,7 @@ import { Button } from "../../../components/ui/Button";
 import { Modal } from "../../../components/ui/Modal";
 import { TextArea } from "../../../components/ui/TextArea";
 import { getErrorMessage } from "../../../lib/errors";
+import { formatMoney } from "../../../lib/money";
 import { useAnularPedido } from "../hooks";
 
 const schema = z.object({
@@ -45,7 +46,7 @@ export function AnularPedidoModal({ pedido, onClose }) {
       open
       onClose={onClose}
       title={`Anular ${pedido.numero}`}
-      description={`${pedido.cliente_nombre} · ${pedido.total} ${pedido.moneda}`}
+      description={`${pedido.cliente_nombre} · ${formatMoney(pedido.total, pedido.moneda)}`}
       footer={
         <div className="flex justify-end gap-2">
           <Button type="button" variant="secondary" onClick={onClose}>

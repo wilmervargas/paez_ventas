@@ -140,7 +140,7 @@ def cliente(db):
         codigo="CL-00001",
         nombre="Cliente de Prueba",
         rif_cedula="V-12345678",
-        telefono="+584141234567",
+        telefono="584141234567",
         email="cliente@example.com",
         direccion="Caracas",
     )

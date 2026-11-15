@@ -1,8 +1,8 @@
 # paez — Sistema de Cobros, Inventario y Gestión Comercial
 
 Sistema interno para una firma/empresa venezolana: catálogo, inventario con kardex,
-compras, pedidos, cuentas por cobrar, pagos, caja, gastos, reportes y recordatorios
-de cobro por WhatsApp mediante enlaces `wa.me`.
+compras, pedidos, cuentas por cobrar, pagos, caja, gastos y reportes, con avisos
+de cobro por WhatsApp (envío manual).
 
 > La fuente de verdad del diseño y las reglas del proyecto es [`AGENTS.md`](./AGENTS.md).
 > Léelo antes de contribuir.
@@ -14,7 +14,7 @@ de cobro por WhatsApp mediante enlaces `wa.me`.
 - Frontend: React + Vite + TypeScript + Tailwind CSS
 - Auth: JWT (`djangorestframework-simplejwt`)
 - Moneda: multimoneda con tasa histórica
-- WhatsApp: enlaces `wa.me` (sin envío automático)
+- WhatsApp: servicio local `ws/server` (Node + Express + Baileys, sesión por QR)
 
 ## Puesta en marcha (backend)
 
@@ -39,6 +39,33 @@ la contraseña temporal antes de operar el resto de módulos.
 - Login: `POST /api/v1/auth/token/` con `{"email": "...", "password": "..."}`
 - Documentación: `http://127.0.0.1:8000/api/docs/`
 - Admin: `http://127.0.0.1:8000/admin/`
+
+## Servicio de WhatsApp (envío de avisos de cobro)
+
+El envío directo usa el servicio local de `ws/server` (Express + Baileys),
+que mantiene una sesión vinculada por QR. Se arranca aparte:
+
+```powershell
+cd ws\server
+npm install
+npm start
+```
+
+Al iniciar, la consola muestra el QR: ábrelo en WhatsApp → Dispositivos
+vinculados → Vincular un dispositivo. El servicio escucha en
+`http://127.0.0.1:3000`.
+
+En `backend/.env`:
+
+```env
+WHATSAPP_WS_URL=http://127.0.0.1:3000
+WHATSAPP_TIMEOUT=20
+```
+
+En **Deudas y cobros**, el botón «Cobrar» de cada deudor abre un mensaje con
+sus deudas pendientes y pagos recientes. Desde ahí puedes editarlo, enviarlo
+directo al WhatsApp del cliente o abrir `wa.me` como respaldo manual. El envío
+siempre lo dispara el usuario; no hay envíos automáticos ni masivos.
 
 ## Puesta en marcha (frontend)
 
@@ -92,5 +119,8 @@ npm run build
   (`/app/tasas`), con resumen del día y correcciones; la última tasa del día es
   la que aplican compras y pedidos en bolívares.
 
-Las apps restantes (`orders`, `finances`, `notifications`, `reports`) están
-creadas como esqueleto para las siguientes fases del roadmap en `AGENTS.md`.
+Las apps restantes (`orders`, `reports`) están creadas como esqueleto para las
+siguientes fases del roadmap en `AGENTS.md`.
+
+> La carpeta `whatsapp-gateway/` quedó como referencia obsoleta y no forma parte
+> del sistema; la integración vigente es `ws/server`.

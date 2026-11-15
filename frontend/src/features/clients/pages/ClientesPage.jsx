@@ -107,7 +107,7 @@ export function ClientesPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {data.results.map((cliente) => (<tr key={cliente.id} className="hover:bg-slate-50/70">
+                  {data.results.map((cliente) => (<tr key={cliente.id} className={cliente.activo ? "bg-emerald-50/60 hover:bg-emerald-100/60" : "bg-rose-50 hover:bg-rose-100/70"}>
                       <td className="px-4 py-3 font-mono text-xs text-slate-500">
                         {cliente.codigo}
                       </td>
@@ -121,7 +121,7 @@ export function ClientesPage() {
                         {formatMoney(cliente.limite_credito, moneda)}
                       </td>
                       <td className="px-4 py-3">
-                        <Badge tone={cliente.activo ? "success" : "neutral"}>
+                        <Badge tone={cliente.activo ? "success" : "danger"}>
                           {cliente.activo ? "Activo" : "Inactivo"}
                         </Badge>
                       </td>

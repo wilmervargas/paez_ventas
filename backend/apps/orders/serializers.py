@@ -140,12 +140,11 @@ class PedidoSerializer(serializers.ModelSerializer):
         min_value=Decimal("0.00"),
         default=Decimal("0.00"),
     )
-    numero_referencia = serializers.CharField(
-        required=False, allow_blank=True, max_length=50
-    )
+    numero_referencia = serializers.CharField(required=False, allow_blank=True, max_length=50)
     tipo_pago = serializers.ChoiceField(
         choices=Pedido.TipoPago.choices, required=False, default=Pedido.TipoPago.CONTADO
     )
+    numero_cuotas = serializers.IntegerField(required=False, min_value=1, max_value=8, default=1)
 
     class Meta:
         model = Pedido
@@ -165,6 +164,7 @@ class PedidoSerializer(serializers.ModelSerializer):
             "total_usd",
             "tipo_pago",
             "tipo_pago_display",
+            "numero_cuotas",
             "subtotal",
             "descuento",
             "otros_montos",
@@ -328,11 +328,19 @@ class PedidoSerializer(serializers.ModelSerializer):
 
 
 class ConfirmarPedidoSerializer(serializers.Serializer):
-    """Serializer vacío: la acción de confirmación no recibe datos adicionales."""
+    """Datos opcionales para confirmación."""
+
+    numero_cuotas = serializers.IntegerField(required=False, min_value=1, max_value=8)
+    fecha_vencimiento = serializers.DateField(required=False, allow_null=True)
 
     def save(self, **kwargs):
         pedido = self.context["pedido"]
-        return confirmar_pedido(pedido, user=self.context["request"].user)
+        return confirmar_pedido(
+            pedido,
+            numero_cuotas=self.validated_data.get("numero_cuotas"),
+            fecha_vencimiento=self.validated_data.get("fecha_vencimiento"),
+            user=self.context["request"].user,
+        )
 
 
 class AnularPedidoSerializer(serializers.Serializer):

@@ -33,3 +33,6 @@ frontend/.vite/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Gateway antiguo (reemplazado por ws/); se conserva solo en disco
+whatsapp-gateway/

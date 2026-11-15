@@ -35,6 +35,7 @@ def test_admin_crea_usuario_con_otro_correo(admin_site_client):
 
     nuevo = User.objects.get(email="maria.perez@empresa.com")
     assert nuevo.rol == "vendedor"
+    assert nuevo.telefono == "584141234567"
     assert nuevo.is_active is True
     assert nuevo.is_staff is False
     assert nuevo.check_password("ClaveSegura123!")

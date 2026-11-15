@@ -9,16 +9,17 @@ import { ImageInput } from "../../../components/ui/ImageInput";
 import { Input } from "../../../components/ui/Input";
 import { Modal } from "../../../components/ui/Modal";
 import { Select } from "../../../components/ui/Select";
+import { toApiDecimal, toDisplayDecimal } from "../../../lib/decimal";
 import { getErrorMessage } from "../../../lib/errors";
 import { useSaveProducto } from "../hooks";
 const monto = z
     .string()
     .trim()
-    .regex(/^\d{1,12}(\.\d{1,2})?$/, "Usa un monto con hasta 2 decimales");
+    .regex(/^\d{1,12}([.,]\d{1,2})?$/, "Usa un monto con coma decimal y hasta 2 decimales");
 const cantidad = z
     .string()
     .trim()
-    .regex(/^\d{1,11}(\.\d{1,3})?$/, "Usa hasta 3 decimales");
+    .regex(/^\d{1,11}([.,]\d{1,2})?$/, "Usa una cantidad con coma decimal y hasta 2 decimales");
 const schema = z.object({
     sku: z.string().trim().min(1, "El SKU es obligatorio").max(50),
     nombre: z.string().trim().min(1, "El nombre es obligatorio").max(200),
@@ -37,10 +38,10 @@ function toDefaults(producto) {
         nombre: producto?.nombre ?? "",
         categoria: producto ? String(producto.categoria) : "",
         unidad: producto ? String(producto.unidad) : "",
-        costo: producto?.costo ?? "0.00",
-        precio: producto?.precio ?? "0.00",
-        stock_minimo: producto?.stock_minimo ?? "0.000",
-        stock_inicial: "0.000",
+        costo: producto?.costo ? toDisplayDecimal(producto.costo, 2) : "0,00",
+        precio: producto?.precio ? toDisplayDecimal(producto.precio, 2) : "0,00",
+        stock_minimo: producto?.stock_minimo ? toDisplayDecimal(producto.stock_minimo, 2) : "0,00",
+        stock_inicial: "0,00",
         iva_aplicable: producto?.iva_aplicable ?? true,
         activo: producto?.activo ?? true,
     };
@@ -62,10 +63,10 @@ export function ProductoFormModal({ producto, categorias, unidades, onClose, }) 
             nombre: values.nombre,
             categoria: Number(values.categoria),
             unidad: Number(values.unidad),
-            costo: values.costo,
-            precio: values.precio,
-            stock_minimo: values.stock_minimo,
-            stock_inicial: producto ? undefined : values.stock_inicial,
+            costo: toApiDecimal(values.costo, 2),
+            precio: toApiDecimal(values.precio, 2),
+            stock_minimo: toApiDecimal(values.stock_minimo, 2),
+            stock_inicial: producto ? undefined : toApiDecimal(values.stock_inicial, 2),
             iva_aplicable: values.iva_aplicable,
             activo: values.activo,
             // `""` pide borrar la imagen guardada; `as const` evita ensanchar a string.
@@ -119,10 +120,10 @@ export function ProductoFormModal({ producto, categorias, unidades, onClose, }) 
                 {unidad.nombre} ({unidad.abreviatura})
               </option>))}
           </Select>
-          <Input label="Costo" inputMode="decimal" placeholder="0.00" hint="Visible solo para administración." error={errors.costo?.message} {...register("costo")}/>
-          <Input label="Precio de venta" inputMode="decimal" placeholder="0.00" error={errors.precio?.message} {...register("precio")}/>
-          <Input label="Stock mínimo" inputMode="decimal" placeholder="0.000" error={errors.stock_minimo?.message} {...register("stock_minimo")}/>
-          {!producto ? (<Input label="Stock inicial" inputMode="decimal" placeholder="0.000" hint="Genera un movimiento de ajuste." error={errors.stock_inicial?.message} {...register("stock_inicial")}/>) : null}
+          <Input label="Costo" inputMode="decimal" placeholder="0,00" hint="Visible solo para administración." error={errors.costo?.message} {...register("costo")}/>
+          <Input label="Precio de venta" inputMode="decimal" placeholder="0,00" error={errors.precio?.message} {...register("precio")}/>
+          <Input label="Stock mínimo" inputMode="decimal" placeholder="0,00" error={errors.stock_minimo?.message} {...register("stock_minimo")}/>
+          {!producto ? (<Input label="Stock inicial" inputMode="decimal" placeholder="0,00" hint="Genera un movimiento de ajuste." error={errors.stock_inicial?.message} {...register("stock_inicial")}/>) : null}
         </div>
 
         <ImageInput label="Imagen del producto" alt={`Imagen de ${producto?.nombre ?? "nuevo producto"}`} currentUrl={producto?.imagen_url ?? null} file={imagen} remove={quitarImagen} onFileChange={setImagen} onRemoveChange={setQuitarImagen}/>

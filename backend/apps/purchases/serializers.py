@@ -87,9 +87,7 @@ class CompraSerializer(serializers.ModelSerializer):
         min_value=Decimal("0.00"),
         default=Decimal("0.00"),
     )
-    numero_referencia = serializers.CharField(
-        required=False, allow_blank=True, max_length=50
-    )
+    numero_referencia = serializers.CharField(required=False, allow_blank=True, max_length=50)
     fecha = serializers.DateField(required=False)
 
     class Meta:

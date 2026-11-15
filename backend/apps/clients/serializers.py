@@ -15,7 +15,7 @@ def _normalizar_telefono(value: str) -> str:
     normalizado = normalize_phone(value)
     if not normalizado:
         raise serializers.ValidationError(
-            "Teléfono inválido. Usa el formato venezolano: 0414-1234567 o +584141234567."
+            "Teléfono inválido. Usa el formato venezolano: 0414-1234567 o 584141234567."
         )
     return normalizado
 

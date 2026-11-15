@@ -9,6 +9,7 @@ import { Input } from "../../../components/ui/Input";
 import { Modal } from "../../../components/ui/Modal";
 import { Select } from "../../../components/ui/Select";
 import { useAuth } from "../../../context/auth-context";
+import { toApiDecimal, toDisplayDecimal } from "../../../lib/decimal";
 import { getErrorMessage } from "../../../lib/errors";
 import { formatQuantity } from "../../../lib/numbers";
 import { isAdmin } from "../../../lib/roles";
@@ -18,12 +19,12 @@ const schema = z.object({
     cantidad: z
         .string()
         .trim()
-        .regex(/^\d{1,11}(\.\d{1,3})?$/, "Usa una cantidad con hasta 3 decimales")
-        .refine((value) => Number(value) > 0, "La cantidad debe ser mayor que cero"),
+        .regex(/^\d{1,11}([.,]\d{1,2})?$/, "Usa una cantidad con coma decimal y hasta 2 decimales")
+        .refine((value) => Number(String(value).replace(",", ".")) > 0, "La cantidad debe ser mayor que cero"),
     costo_unitario: z
         .string()
         .trim()
-        .regex(/^\d{1,12}(\.\d{1,4})?$/, "Usa un costo con hasta 4 decimales"),
+        .regex(/^\d{1,12}([.,]\d{1,2})?$/, "Usa un costo con coma decimal y hasta 2 decimales"),
     motivo: z.string().trim().min(1, "Indica el motivo del ajuste").max(200),
 });
 export function AjusteStockModal({ producto, onClose, }) {
@@ -36,7 +37,7 @@ export function AjusteStockModal({ producto, onClose, }) {
         defaultValues: {
             direccion: "entrada",
             cantidad: "",
-            costo_unitario: producto.costo ?? "0.0000",
+            costo_unitario: producto.costo ? toDisplayDecimal(producto.costo, 2) : "0,00",
             motivo: "",
         },
     });
@@ -45,10 +46,10 @@ export function AjusteStockModal({ producto, onClose, }) {
         try {
             await mutation.mutateAsync({
                 producto: producto.id,
-                cantidad: values.cantidad,
+                cantidad: toApiDecimal(values.cantidad, 2),
                 direccion: values.direccion,
                 motivo: values.motivo,
-                costo_unitario: puedeVerCostos ? values.costo_unitario : undefined,
+                costo_unitario: puedeVerCostos ? toApiDecimal(values.costo_unitario, 2) : undefined,
             });
             onClose();
         }
@@ -81,10 +82,10 @@ export function AjusteStockModal({ producto, onClose, }) {
             <option value="entrada">Entrada (suma stock)</option>
             <option value="salida">Salida (resta stock)</option>
           </Select>
-          <Input label="Cantidad *" inputMode="decimal" placeholder="0.000" error={errors.cantidad?.message} {...register("cantidad")}/>
+          <Input label="Cantidad *" inputMode="decimal" placeholder="0,00" error={errors.cantidad?.message} {...register("cantidad")}/>
         </div>
 
-        {puedeVerCostos ? (<Input label="Costo unitario" inputMode="decimal" placeholder="0.0000" hint="Solo se aplica en entradas y recalcula el costo promedio." error={errors.costo_unitario?.message} {...register("costo_unitario")}/>) : null}
+        {puedeVerCostos ? (<Input label="Costo unitario" inputMode="decimal" placeholder="0,00" hint="Solo se aplica en entradas y recalcula el costo promedio." error={errors.costo_unitario?.message} {...register("costo_unitario")}/>) : null}
 
         <Input label="Motivo *" placeholder="Ej. merma, reposición, conteo físico" error={errors.motivo?.message} {...register("motivo")}/>
 

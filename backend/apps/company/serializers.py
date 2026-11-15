@@ -1,8 +1,11 @@
 """Serializers de empresa y tasas."""
 
+from decimal import Decimal
+
 from rest_framework import serializers
 
 from apps.common.fields import ImagenOpcionalField
+from apps.common.utils.phone import phone_digits
 
 from .models import Empresa, TasaCambio
 
@@ -40,6 +43,9 @@ class EmpresaSerializer(serializers.ModelSerializer):
         url = obj.logo.url
         return request.build_absolute_uri(url) if request else url
 
+    def validate_telefono(self, value: str) -> str:
+        return phone_digits(value)
+
     def validate_moneda_base(self, value: str) -> str:
         value = value.strip().upper()
         if len(value) != 3 or not value.isalpha():
@@ -64,6 +70,19 @@ class TasaCambioSerializer(serializers.ModelSerializer):
         )
         read_only_fields = ("id", "es_calculada", "created_at")
 
+    def update(self, instance, validated_data):
+        instance = super().update(instance, validated_data)
+        # Al actualizar fechas/datos de la tasa, se intercambian los valores de
+        # "registrada" (created_at) y "vigencia" (vigente_desde).
+        registrada = instance.created_at
+        vigencia = instance.vigente_desde
+        TasaCambio.objects.filter(pk=instance.pk).update(
+            created_at=vigencia,
+            vigente_desde=registrada,
+        )
+        instance.refresh_from_db()
+        return instance
+
     def validate_moneda(self, value: str) -> str:
         return _validar_codigo(value, "moneda")
 
@@ -76,16 +95,23 @@ class TasaCambioSerializer(serializers.ModelSerializer):
     def validate_tasa(self, value):
         if value <= 0:
             raise serializers.ValidationError("La tasa debe ser mayor que cero.")
-        return value
+        # Valores de dólar/euro/USDT se manejan con 2 decimales.
+        return value.quantize(Decimal("0.01"))
 
     def validate(self, attrs):
         moneda = attrs.get("moneda") or getattr(self.instance, "moneda", "VES")
         base = attrs.get("moneda_base")
         if base is None:
             base = getattr(self.instance, "moneda_base", "") or ""
-        if base and moneda.strip().upper() == base.strip().upper():
+        fuente = attrs.get("fuente") or getattr(self.instance, "fuente", None)
+        base_norm = (base or "").strip().upper()
+        if base_norm and moneda.strip().upper() == base_norm:
             raise serializers.ValidationError(
                 {"moneda_base": "La moneda base debe ser distinta de la moneda cotizada."}
+            )
+        if base_norm == "USDT" and fuente == "bcv":
+            raise serializers.ValidationError(
+                {"fuente": "La tasa USDT no puede tener fuente BCV."}
             )
         return attrs
 

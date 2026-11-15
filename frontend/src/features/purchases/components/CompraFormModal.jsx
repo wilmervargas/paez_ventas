@@ -11,7 +11,7 @@ import { Select } from "../../../components/ui/Select";
 import { TextArea } from "../../../components/ui/TextArea";
 import { useCompany } from "../../../context/company-context";
 import { formatDate } from "../../../lib/dates";
-import { addDecimals, multiplyDecimals, percentOf } from "../../../lib/decimal";
+import { addDecimals, multiplyDecimals, percentOf, toApiDecimal, toDisplayDecimal } from "../../../lib/decimal";
 import { getErrorMessage } from "../../../lib/errors";
 import { formatMoney, formatRate } from "../../../lib/money";
 import { formatQuantity } from "../../../lib/numbers";
@@ -19,19 +19,19 @@ import { useSaveCompra, useTasaVigente } from "../hooks";
 
 const MODO_LABEL = { usd_bcv: "Dólar BCV", eur_bcv: "Euro BCV", usdt: "USDT", ajuste: "Ajuste (Bs)" };
 
-const monto = z.string().trim().regex(/^\d{1,12}(\.\d{1,4})?$/, "Usa un costo con hasta 4 decimales");
-const monto2 = z.string().trim().regex(/^\d{1,12}(\.\d{1,2})?$/, "Usa un monto con hasta 2 decimales");
+const monto = z.string().trim().regex(/^\d{1,12}([.,]\d{1,4})?$/, "Usa un costo con hasta 4 decimales");
+const monto2 = z.string().trim().regex(/^\d{1,12}([.,]\d{1,2})?$/, "Usa un monto con hasta 2 decimales");
 const cantidad = z
   .string()
   .trim()
-  .regex(/^\d{1,11}(\.\d{1,3})?$/, "Usa una cantidad con hasta 3 decimales")
-  .refine((value) => !/^0+(?:\.0+)?$/.test(value), "La cantidad debe ser mayor que cero");
+  .regex(/^\d{1,11}([.,]\d{1,3})?$/, "Usa una cantidad con hasta 3 decimales")
+  .refine((value) => !/^0+(?:[.,]0+)?$/.test(value), "La cantidad debe ser mayor que cero");
 const tasa = z
   .string()
   .trim()
   .min(1, "Indica la tasa")
-  .regex(/^\d{1,12}(\.\d{1,6})?$/, "Usa una tasa con hasta 6 decimales")
-  .refine((value) => Number(value) > 0, "La tasa debe ser mayor que cero");
+  .regex(/^\d{1,12}([.,]\d{1,6})?$/, "Usa una tasa con hasta 6 decimales")
+  .refine((value) => Number(String(value).replace(",", ".")) > 0, "La tasa debe ser mayor que cero");
 
 const schema = z
   .object({
@@ -71,32 +71,37 @@ function baseDivisa(modo) {
 function toDefaults(compra) {
   if (compra) {
     const tasaDoc = compra.tasa_cambio || "1";
+    const esVes = compra.moneda === "VES";
+    const esAjusteDoc = esVes && Number(tasaDoc) === 1;
+    const tasaBcv = compra.tasa_bcv ?? null;
+    const mismaQueBcv =
+      tasaBcv != null && Math.abs(Number(tasaDoc) - Number(tasaBcv)) < 0.000001;
+    const modoInicial = esAjusteDoc ? "ajuste" : mismaQueBcv ? "usd_bcv" : "usd_bcv";
     // Reconstruir montos en divisa a partir de Bs guardados (Bs / tasa)
     const toDivisa2 = (bs) => {
       const n = Number(bs || 0);
       const t = Number(tasaDoc || 1);
-      if (!Number.isFinite(n) || !Number.isFinite(t) || t === 0) return "0.00";
-      return (n / t).toFixed(2);
+      if (!Number.isFinite(n) || !Number.isFinite(t) || t === 0) return "0,00";
+      return (n / t).toFixed(2).replace(".", ",");
     };
     const toDivisa4 = (bs) => {
       const n = Number(bs || 0);
       const t = Number(tasaDoc || 1);
-      if (!Number.isFinite(n) || !Number.isFinite(t) || t === 0) return "0.0000";
-      return (n / t).toFixed(4);
+      if (!Number.isFinite(n) || !Number.isFinite(t) || t === 0) return "0,00";
+      return (n / t).toFixed(2).replace(".", ",");
     };
-    const esVes = compra.moneda === "VES";
     return {
       proveedor: String(compra.proveedor),
       fecha: compra.fecha,
       numero_referencia: compra.numero_referencia ?? "",
-      modo_tasa: esVes ? "ajuste" : "ajuste", // edición segura: permite ajustar tasa/montos
-      tasa_monto: esVes ? "1.000000" : tasaDoc,
-      otros_montos: esVes ? (compra.otros_montos ?? "0.00") : toDivisa2(compra.otros_montos ?? "0.00"),
+      modo_tasa: modoInicial,
+      tasa_monto: toDisplayDecimal(esAjusteDoc ? "1" : tasaDoc, 2),
+      otros_montos: esAjusteDoc ? toDisplayDecimal(compra.otros_montos ?? "0", 2) : toDivisa2(compra.otros_montos ?? "0"),
       notas: compra.notas ?? "",
       detalles: (compra.lineas || []).map((linea) => ({
         producto: String(linea.producto),
-        cantidad: linea.cantidad,
-        costo_unitario: esVes ? linea.costo_unitario : toDivisa4(linea.costo_unitario),
+        cantidad: toDisplayDecimal(linea.cantidad, 2),
+        costo_unitario: esAjusteDoc ? toDisplayDecimal(linea.costo_unitario, 2) : toDivisa4(linea.costo_unitario),
         aplica_iva: linea.aplica_iva !== false,
       })),
     };
@@ -107,9 +112,9 @@ function toDefaults(compra) {
     numero_referencia: "",
     modo_tasa: "usd_bcv",
     tasa_monto: "",
-    otros_montos: "0.00",
+    otros_montos: "0,00",
     notas: "",
-    detalles: [{ producto: "", cantidad: "1.000", costo_unitario: "0.0000", aplica_iva: true }],
+    detalles: [{ producto: "", cantidad: "1,00", costo_unitario: "0,00", aplica_iva: true }],
   };
 }
 
@@ -117,6 +122,11 @@ export function CompraFormModal({ compra, proveedores, productos, onClose }) {
   const { company } = useCompany();
   const ivaRate = company?.iva_rate ?? "16.00";
   const [error, setError] = useState(null);
+  const esAjusteInicial = Boolean(
+    compra && compra.moneda === "VES" && Number(compra.tasa_cambio || "1") === 1
+  );
+  const [tasaAuto, setTasaAuto] = useState(!compra || esAjusteInicial);
+  const [modoInferido, setModoInferido] = useState(!compra || esAjusteInicial);
   const mutation = useSaveCompra();
 
   const { register, control, handleSubmit, setValue, formState: { errors, isSubmitting } } = useForm({
@@ -128,7 +138,7 @@ export function CompraFormModal({ compra, proveedores, productos, onClose }) {
   const modoTasa = useWatch({ control, name: "modo_tasa" }) ?? "usd_bcv";
   const fecha = useWatch({ control, name: "fecha" }) ?? "";
   const tasaMonto = useWatch({ control, name: "tasa_monto" }) ?? "";
-  const otrosMontos = useWatch({ control, name: "otros_montos" }) ?? "0.00";
+  const otrosMontos = useWatch({ control, name: "otros_montos" }) ?? "0,00";
   const detalles = useWatch({ control, name: "detalles" }) ?? [];
 
   const esAjuste = modoTasa === "ajuste";
@@ -136,23 +146,58 @@ export function CompraFormModal({ compra, proveedores, productos, onClose }) {
   // tasa registrada: Bs por 1 USD/EUR/USDT (VES como moneda, base = divisa)
   const tasaQuery = useTasaVigente("VES", divisa, fecha);
   const tasaDia = tasaQuery.data?.tasa ?? "";
+  const fechaDoc = compra?.fecha ?? "";
+  const debeInferirModo = Boolean(compra && !esAjusteInicial);
+  const tasaEurDoc = useTasaVigente("VES", "EUR", fechaDoc);
+  const tasaUsdtDoc = useTasaVigente("VES", "USDT", fechaDoc);
 
   useEffect(() => {
-    if (esAjuste) return;
-    if (tasaQuery.isFetched) {
-      setValue("tasa_monto", tasaDia || "");
+    if (!debeInferirModo || modoInferido) return;
+    const tasaDocNum = Number(compra?.tasa_cambio || 0);
+    if (!Number.isFinite(tasaDocNum) || tasaDocNum <= 0) {
+      setModoInferido(true);
+      return;
     }
-  }, [esAjuste, tasaDia, tasaQuery.isFetched, setValue, modoTasa, fecha]);
+    const tasaBcvNum = Number(compra?.tasa_bcv ?? 0);
+    if (Number.isFinite(tasaBcvNum) && tasaBcvNum > 0 && Math.abs(tasaDocNum - tasaBcvNum) < 0.000001) {
+      setValue("modo_tasa", "usd_bcv", { shouldDirty: false, shouldValidate: true });
+      setModoInferido(true);
+      return;
+    }
+    const eur = tasaEurDoc.data?.tasa;
+    const usdt = tasaUsdtDoc.data?.tasa;
+    if (eur && Math.abs(tasaDocNum - Number(eur)) < 0.000001) {
+      setValue("modo_tasa", "eur_bcv", { shouldDirty: false, shouldValidate: true });
+      setModoInferido(true);
+      return;
+    }
+    if (usdt && Math.abs(tasaDocNum - Number(usdt)) < 0.000001) {
+      setValue("modo_tasa", "usdt", { shouldDirty: false, shouldValidate: true });
+      setModoInferido(true);
+      return;
+    }
+    if (tasaEurDoc.isFetched && tasaUsdtDoc.isFetched) {
+      // No coincide con tasas conocidas: conservar modo actual y tasa del documento.
+      setModoInferido(true);
+    }
+  }, [debeInferirModo, modoInferido, compra, tasaEurDoc.data, tasaEurDoc.isFetched, tasaUsdtDoc.data, tasaUsdtDoc.isFetched, setValue]);
 
-  const tasaNum = Number(tasaMonto || 0);
+  useEffect(() => {
+    if (esAjuste || !tasaAuto) return;
+    if (tasaQuery.isFetched) {
+      setValue("tasa_monto", tasaDia ? toDisplayDecimal(tasaDia, 2) : "");
+    }
+  }, [esAjuste, tasaAuto, tasaDia, tasaQuery.isFetched, setValue, modoTasa, fecha]);
+
+  const tasaNum = Number(String(tasaMonto || "0").replace(",", "."));
   const factor = esAjuste ? 1 : (Number.isFinite(tasaNum) && tasaNum > 0 ? tasaNum : 0);
 
   // Montos ingresados en divisa (o Bs si ajuste). Convertidos a Bs para totales.
   const subtotalesLineasBs = detalles.map((d) => multiplyDecimals(multiplyDecimals(d.cantidad, d.costo_unitario, 4), String(factor || 0), 2));
   const subtotalBs = addDecimals(subtotalesLineasBs, 2);
-  const baseIvaBs = addDecimals(detalles.map((d, i) => (d.aplica_iva !== false ? subtotalesLineasBs[i] || "0.00" : "0.00")), 2);
+  const baseIvaBs = addDecimals(detalles.map((d, i) => (d.aplica_iva !== false ? subtotalesLineasBs[i] || "0,00" : "0,00")), 2);
   const ivaBs = percentOf(baseIvaBs, ivaRate, 2);
-  const otrosMontosBs = esAjuste ? (otrosMontos || "0.00") : multiplyDecimals(otrosMontos || "0.00", String(factor || 0), 2);
+  const otrosMontosBs = esAjuste ? (otrosMontos || "0,00") : multiplyDecimals(otrosMontos || "0,00", String(factor || 0), 2);
   const totalBs = addDecimals([subtotalBs, ivaBs, otrosMontosBs], 2);
 
   const sinCatalogos = proveedores.length === 0 || productos.length === 0;
@@ -160,22 +205,23 @@ export function CompraFormModal({ compra, proveedores, productos, onClose }) {
 
   const onSubmit = handleSubmit(async (values) => {
     setError(null);
-    const t = esAjuste ? 1 : Number(values.tasa_monto || 0);
-    const toBs4 = (v) => multiplyDecimals(v || "0", String(t || 0), 4);
-    const toBs2 = (v) => multiplyDecimals(v || "0", String(t || 0), 2);
+    const norm = (v, dp = 2) => toApiDecimal(v, dp);
+    const t = esAjuste ? 1 : Number(norm(values.tasa_monto || "0", 6) || 0);
+    const toBs4 = (v) => multiplyDecimals(norm(v || "0", 4), String(t || 0), 4);
+    const toBs2 = (v) => multiplyDecimals(norm(v || "0", 2), String(t || 0), 2);
 
     const payload = {
       proveedor: Number(values.proveedor),
       fecha: values.fecha,
       numero_referencia: values.numero_referencia?.trim() || "",
       moneda: "VES",
-      tasa_cambio: esAjuste ? "1.000000" : values.tasa_monto,
-      otros_montos: esAjuste ? (values.otros_montos || "0.00") : toBs2(values.otros_montos),
+      tasa_cambio: esAjuste ? "1.000000" : norm(values.tasa_monto, 6),
+      otros_montos: esAjuste ? norm(values.otros_montos || "0", 2) : toBs2(norm(values.otros_montos)),
       notas: values.notas.trim(),
       detalles: values.detalles.map((d) => ({
         producto: Number(d.producto),
-        cantidad: d.cantidad,
-        costo_unitario: esAjuste ? d.costo_unitario : toBs4(d.costo_unitario),
+        cantidad: norm(d.cantidad, 3),
+        costo_unitario: esAjuste ? norm(d.costo_unitario, 4) : toBs4(norm(d.costo_unitario)),
         aplica_iva: Boolean(d.aplica_iva),
       })),
     };
@@ -215,13 +261,26 @@ export function CompraFormModal({ compra, proveedores, productos, onClose }) {
             <option value="">Selecciona un proveedor</option>
             {proveedores.map((p) => (<option key={p.id} value={p.id}>{p.codigo} · {p.nombre}</option>))}
           </Select>
-          <Input label="Fecha *" type="date" error={errors.fecha?.message} {...register("fecha")} />
+          <Input
+            label="Fecha *"
+            type="date"
+            error={errors.fecha?.message}
+            {...register("fecha", {
+              onChange: () => setTasaAuto(true),
+            })}
+          />
           <Input label="N.º orden / factura" placeholder="Factura u orden del proveedor" error={errors.numero_referencia?.message} {...register("numero_referencia")} />
           <Input label={`Otros montos ${esAjuste ? "(Bs)" : `(${divisa})`}`} inputMode="decimal" hint="Monto adicional sin IVA; se suma al total de la factura." error={errors.otros_montos?.message} {...register("otros_montos")} />
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          <Select label="Tasa / moneda de cálculo *" error={errors.modo_tasa?.message} {...register("modo_tasa")}>
+          <Select
+            label="Tasa / moneda de cálculo *"
+            error={errors.modo_tasa?.message}
+            {...register("modo_tasa", {
+              onChange: () => setTasaAuto(true),
+            })}
+          >
             <option value="usd_bcv">Dólar BCV</option>
             <option value="eur_bcv">Euro BCV</option>
             <option value="usdt">USDT</option>
@@ -231,7 +290,29 @@ export function CompraFormModal({ compra, proveedores, productos, onClose }) {
             {esAjuste ? (
               <Input label="Tasa (Bs) - Ajuste *" inputMode="decimal" hint="Modo Ajuste: ingresa manualmente la tasa/monto en Bs (VES)." error={errors.tasa_monto?.message} {...register("tasa_monto")} />
             ) : (
-              <Input label={`Tasa ${MODO_LABEL[modoTasa]} (Bs por 1 ${divisa})`} readOnly value={tasaDia ? formatRate(tasaDia) : (tasaQuery.isFetched ? "Sin tasa registrada" : "Cargando...")} hint={tasaDia ? `Tomada del registro del día para ${formatDate(fecha)}.` : "Se usa la tasa registrada del día para calcular en Bs."} error={errors.tasa_monto?.message} />
+              <Input
+                label={`Tasa ${MODO_LABEL[modoTasa]} (Bs por 1 ${divisa})`}
+                readOnly
+                value={
+                  !tasaAuto && tasaMonto
+                    ? formatRate(tasaMonto)
+                    : tasaDia
+                      ? formatRate(tasaDia)
+                      : tasaQuery.isFetched
+                        ? "Sin tasa registrada"
+                        : "Cargando..."
+                }
+                hint={
+                  !tasaAuto && tasaMonto
+                    ? "Tasa del documento conservada. Si cambias la fecha o el modo de tasa, se tomará la tasa vigente."
+                    : tasaQuery.data?.vigente_desde
+                      ? `Vigente desde ${formatDate(tasaQuery.data.vigente_desde)}${tasaQuery.data.es_calculada ? " (calculada)" : ""}.`
+                      : tasaDia
+                        ? `Tomada del registro del día para ${formatDate(fecha)}.`
+                        : "Se usa la tasa vigente registrada para calcular en Bs."
+                }
+                error={errors.tasa_monto?.message}
+              />
             )}
             {!esAjuste ? <input type="hidden" {...register("tasa_monto")} /> : null}
           </div>
@@ -247,7 +328,7 @@ export function CompraFormModal({ compra, proveedores, productos, onClose }) {
               <p className="text-sm font-semibold text-slate-900">Líneas de compra</p>
               <p className="text-xs text-slate-500">Costos en {esAjuste ? "Bs (VES)" : divisa}. IVA por ítem (default activo). Totales calculados y guardados en Bs (VES).</p>
             </div>
-            <Button type="button" variant="secondary" className="px-2.5 py-1.5 text-xs" onClick={() => append({ producto: "", cantidad: "1.000", costo_unitario: "0.0000", aplica_iva: true })} icon={<Plus className="h-3.5 w-3.5" />}>Agregar línea</Button>
+            <Button type="button" variant="secondary" className="px-2.5 py-1.5 text-xs" onClick={() => append({ producto: "", cantidad: "1,00", costo_unitario: "0,00", aplica_iva: true })} icon={<Plus className="h-3.5 w-3.5" />}>Agregar línea</Button>
           </div>
           <div className="space-y-3 p-4">
             {errors.detalles?.message ? <p className="text-xs font-medium text-rose-600">{errors.detalles.message}</p> : null}
@@ -266,10 +347,10 @@ export function CompraFormModal({ compra, proveedores, productos, onClose }) {
                   <div className="flex items-end justify-between gap-2 sm:flex-col sm:items-end">
                     <div className="text-right">
                       <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Subtotal (Bs)</p>
-                      <p className="text-sm font-semibold text-slate-900">{formatMoney(subtotalesLineasBs[index] || "0.00", "VES")}</p>
+                      <p className="text-sm font-semibold text-slate-900">{formatMoney(subtotalesLineasBs[index] || "0,00", "VES")}</p>
                       {prod ? <p className="text-xs text-slate-500">Stock: {formatQuantity(prod.stock)} {prod.unidad_abreviatura}</p> : null}
                     </div>
-                    <Button type="button" variant="ghost" className="px-2 py-2 text-rose-600 hover:bg-rose-50" onClick={() => remove(index)} disabled={fields.length === 1} aria-label={`Quitar línea ${index + 1}`} icon={<Trash2 className="h-4 w-4" />}><span className="sr-only">Quitar</span></Button>
+                    <Button type="button" variant="ghost" className="px-2 py-2 text-rose-600 hover:bg-rose-50" onClick={() => remove(index)} aria-label={`Quitar línea ${index + 1}`} icon={<Trash2 className="h-4 w-4" />}><span className="sr-only">Quitar</span></Button>
                   </div>
                 </div>
               );

@@ -24,7 +24,7 @@ def test_vendedor_crea_cliente_con_codigo_automatico(auth_client, empresa):
 
     assert response.status_code == 201
     assert response.data["codigo"] == "CL-00001"
-    assert response.data["telefono"] == "+584141234567"
+    assert response.data["telefono"] == "584141234567"
     assert Cliente.objects.count() == 1
 
 

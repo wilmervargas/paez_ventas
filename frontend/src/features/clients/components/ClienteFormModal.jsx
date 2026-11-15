@@ -8,6 +8,7 @@ import { Button } from "../../../components/ui/Button";
 import { Input } from "../../../components/ui/Input";
 import { Modal } from "../../../components/ui/Modal";
 import { TextArea } from "../../../components/ui/TextArea";
+import { formatInputDecimal, toApiDecimal } from "../../../lib/decimal";
 import { getErrorMessage } from "../../../lib/errors";
 import { useSaveCliente } from "../hooks";
 const schema = z.object({
@@ -21,7 +22,10 @@ const schema = z.object({
     limite_credito: z
         .string()
         .trim()
-        .regex(/^\d{1,12}(\.\d{1,2})?$/, "Usa un monto con hasta 2 decimales"),
+        .regex(
+            /^(?:\d{1,12}|\d{1,3}(?:\.\d{3})+)(?:,\d{1,2})?$/,
+            "Usa un monto con coma decimal y hasta 2 decimales",
+        ),
     notas: z.string(),
     activo: z.boolean(),
 });
@@ -34,7 +38,7 @@ function toDefaults(cliente) {
         telefono_alt: cliente?.telefono_alt ?? "",
         email: cliente?.email ?? "",
         direccion: cliente?.direccion ?? "",
-        limite_credito: cliente?.limite_credito ?? "0.00",
+        limite_credito: cliente?.limite_credito != null ? formatInputDecimal(cliente.limite_credito, 2) : "0,00",
         notas: cliente?.notas ?? "",
         activo: cliente?.activo ?? true,
     };
@@ -48,7 +52,11 @@ export function ClienteFormModal({ cliente, onClose, }) {
     });
     const onSubmit = handleSubmit(async (values) => {
         setError(null);
-        const payload = { ...values, codigo: values.codigo || undefined };
+        const payload = {
+            ...values,
+            codigo: values.codigo || undefined,
+            limite_credito: toApiDecimal(values.limite_credito, 2),
+        };
         try {
             if (cliente) {
                 await mutation.mutateAsync({ id: cliente.id, payload });
@@ -81,8 +89,8 @@ export function ClienteFormModal({ cliente, onClose, }) {
           <Input label="Nombre *" placeholder="Nombre o razón social" error={errors.nombre?.message} {...register("nombre")}/>
           <Input label="Código" placeholder="Automático" error={errors.codigo?.message} {...register("codigo")}/>
           <Input label="RIF / cédula" placeholder="V-12345678" error={errors.rif_cedula?.message} {...register("rif_cedula")}/>
-          <Input label="Límite de crédito" inputMode="decimal" placeholder="0.00" error={errors.limite_credito?.message} {...register("limite_credito")}/>
-          <Input label="Teléfono" placeholder="0414-1234567" hint="Se normaliza automáticamente a +58." error={errors.telefono?.message} {...register("telefono")}/>
+          <Input label="Límite de crédito" inputMode="decimal" placeholder="0,00" error={errors.limite_credito?.message} {...register("limite_credito")}/>
+          <Input label="Teléfono" placeholder="0414-1234567" hint="Se normaliza automáticamente a número internacional sin el signo + (ej. 584141234567)." error={errors.telefono?.message} {...register("telefono")}/>
           <Input label="Teléfono alterno" placeholder="0212-5555555" error={errors.telefono_alt?.message} {...register("telefono_alt")}/>
           <Input label="Correo electrónico" type="email" placeholder="cliente@correo.com" error={errors.email?.message} {...register("email")}/>
           <label className="flex items-center gap-2 self-end pb-3 text-sm font-medium text-slate-700">

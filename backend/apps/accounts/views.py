@@ -18,12 +18,22 @@ from rest_framework_simplejwt.token_blacklist.models import (
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 
+from django.contrib.auth import get_user_model
+
+from apps.common.permissions import IsSuperUser
+from rest_framework import viewsets
+from rest_framework.decorators import action
+
 from .serializers import (
+    AdminSetPasswordSerializer,
+    AdminUserSerializer,
     ChangePasswordSerializer,
     LoginSerializer,
     ProfileUpdateSerializer,
     UserSerializer,
 )
+
+User = get_user_model()
 
 
 def _set_refresh_cookie(response, token) -> None:
@@ -167,3 +177,32 @@ class ChangePasswordView(APIView):
             path=settings.REFRESH_COOKIE_PATH,
         )
         return response
+
+
+class AdminUserViewSet(viewsets.ModelViewSet):
+    """Gestión de usuarios del sistema. Solo superusuarios."""
+
+    queryset = User.objects.all().order_by("nombre", "email")
+    serializer_class = AdminUserSerializer
+    permission_classes = (IsAuthenticated, IsSuperUser)
+    filterset_fields = ("rol", "is_active", "is_superuser")
+    search_fields = ("email", "nombre", "telefono")
+    ordering_fields = ("nombre", "email", "date_joined", "is_active", "rol")
+
+    @extend_schema(request=AdminSetPasswordSerializer, responses={200: OpenApiTypes.OBJECT})
+    @action(detail=True, methods=["post"], url_path="set-password")
+    def set_password(self, request, pk=None):
+        target = self.get_object()
+        serializer = AdminSetPasswordSerializer(
+            data=request.data, context={"target_user": target}
+        )
+        serializer.is_valid(raise_exception=True)
+        must_change = bool(request.data.get("must_change_password", False))
+        serializer.save(must_change_password=must_change)
+        # Revocar sesiones del usuario objetivo por seguridad.
+        for token in OutstandingToken.objects.filter(user=target):
+            BlacklistedToken.objects.get_or_create(token=token)
+        return Response(
+            {"detail": "Contraseña actualizada correctamente."},
+            status=status.HTTP_200_OK,
+        )

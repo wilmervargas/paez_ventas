@@ -5,6 +5,7 @@ import { Alert } from "../../components/ui/Alert";
 import { Button } from "../../components/ui/Button";
 import { Card, CardBody, CardHeader } from "../../components/ui/Card";
 import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
+import { ServerStatus } from "../../components/layout/ServerStatus";
 import { useAuth } from "../../context/auth-context";
 import { api } from "../../lib/api";
 import { getErrorMessage } from "../../lib/errors";
@@ -41,11 +42,16 @@ export function DashboardPage() {
     <div className="space-y-6">
       <section className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-900 p-6 text-white shadow-lg sm:p-8">
         <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-indigo-500/20 blur-3xl" />
-        <div className="relative">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">
-            Panel principal
-          </p>
-          <h1 className="mt-2 text-xl font-semibold sm:text-2xl">Hola, {firstName}</h1>
+        <div className="relative flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">
+              Panel principal
+            </p>
+            <h1 className="mt-2 text-xl font-semibold sm:text-2xl">Hola, {firstName}</h1>
+          </div>
+          <div className="shrink-0 rounded-xl bg-white/10 px-3 py-2 ring-1 ring-white/15 backdrop-blur-sm">
+            <ServerStatus />
+          </div>
         </div>
       </section>
 
@@ -84,7 +90,7 @@ export function DashboardPage() {
       <ConfirmDialog
         open={showDbReset}
         title="Limpiar base de datos"
-        message="¿Seguro que deseas limpiar la base de datos? Se eliminarán clientes, proveedores, productos/combos, inventario, compras, pedidos, finanzas, secuencias y demás registros, conservando solo empresa, tasas de cambio y catálogos (categorías/unidades). Esta acción no se puede deshacer."
+        message="¿Seguro que deseas limpiar la base de datos? Se eliminarán clientes, proveedores, productos/combos, inventario, compras, pedidos, finanzas (deudas, cuotas, pagos y caja), secuencias, sesiones y demás registros operativos, conservando solo empresa, tasas de cambio, categorías, unidades de medida y usuarios. Esta acción no se puede deshacer."
         confirmLabel="Sí, limpiar base de datos"
         cancelLabel="Cancelar"
         loading={dbResetLoading}

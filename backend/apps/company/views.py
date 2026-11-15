@@ -7,7 +7,7 @@ from django_filters import rest_framework as filters
 from drf_spectacular.utils import extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -20,12 +20,13 @@ from apps.common.permissions import (
 from .models import TasaCambio
 from .serializers import EmpresaSerializer, ResumenTasaSerializer, TasaCambioSerializer
 from .services import (
-    ALLOWED_DB_RESET_EMAIL,
+    asegurar_tasas_del_dia,
     eliminar_tasa,
     get_empresa,
     get_resumen_tasas,
     get_tasa_del_dia,
     limpiar_base_datos,
+    sincronizar_tasas_externas,
     upsert_empresa,
 )
 
@@ -88,15 +89,14 @@ class EmpresaView(APIView):
 class LimpiarBaseDatosView(APIView):
     """Acción de mantenimiento: depura datos operativos de la BD."""
 
-    permission_classes = [IsAuthenticatedAndCompanyReady, IsAdmin]
+    permission_classes = [IsAuthenticatedAndCompanyReady]
 
     @extend_schema(request=None, responses={200: dict})
     def post(self, request):
-        email = (getattr(request.user, "email", "") or "").strip().lower()
-        if email != ALLOWED_DB_RESET_EMAIL:
+        if not getattr(request.user, "is_superuser", False):
             return Response(
                 {
-                    "detail": "No autorizado para ejecutar esta acción.",
+                    "detail": "Solo los superusuarios pueden ejecutar esta acción.",
                     "code": "forbidden",
                     "errors": {},
                 },
@@ -106,7 +106,11 @@ class LimpiarBaseDatosView(APIView):
             deleted = limpiar_base_datos(requested_by=request.user)
         except PermissionError:
             return Response(
-                {"detail": "No autorizado para ejecutar esta acción.", "code": "forbidden", "errors": {}},
+                {
+                    "detail": "Solo los superusuarios pueden ejecutar esta acción.",
+                    "code": "forbidden",
+                    "errors": {},
+                },
                 status=status.HTTP_403_FORBIDDEN,
             )
         return Response(
@@ -138,7 +142,7 @@ class TasaCambioViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "post", "put", "patch", "delete", "head", "options"]
 
     def get_permissions(self):
-        if self.action in ("create", "update", "partial_update", "destroy"):
+        if self.action in ("create", "update", "partial_update", "destroy", "sincronizar"):
             return [IsAuthenticatedAndCompanyReady(), IsAdmin()]
         # Las acciones de lectura usan el permiso global (incluye el gate fiscal).
         return super().get_permissions()
@@ -197,7 +201,11 @@ class TasaCambioViewSet(viewsets.ModelViewSet):
     @extend_schema(parameters=[{"name": "fecha", "type": "date"}], responses=ResumenTasaSerializer)
     @action(detail=False, methods=["get"], url_path="resumen")
     def resumen(self, request):
-        """Última tasa en bolívares de USD, EUR y USDT para la fecha indicada."""
+        """Última tasa en bolívares de USD, EUR y USDT para la fecha indicada.
+
+        Para la fecha actual, si faltan tasas del día, intenta sincronizarlas
+        automáticamente desde las fuentes configuradas.
+        """
         fecha_param = request.query_params.get("fecha")
         fecha = None
         if fecha_param:
@@ -219,4 +227,27 @@ class TasaCambioViewSet(viewsets.ModelViewSet):
                 "fecha": (fecha or timezone.localdate()).isoformat(),
                 "monedas": ResumenTasaSerializer(filas, many=True).data,
             }
+        )
+
+    @extend_schema(request=None, responses={200: dict})
+    @action(detail=False, methods=["post"], url_path="sincronizar")
+    def sincronizar(self, request):
+        """Sincroniza tasas (USD/EUR/USDT) desde fuentes externas para hoy.
+
+        Verifica fechas de las fuentes antes de capturar. Solo crea tasas
+        faltantes del día; no modifica ni elimina tasas existentes (editables).
+        """
+        # Sincronización manual explícita: se permite forzar la consulta.
+        resultado = asegurar_tasas_del_dia(forzar=True) or sincronizar_tasas_externas()
+        filas = get_resumen_tasas(auto_sync=False)
+        return Response(
+            {
+                "detail": "Sincronización ejecutada.",
+                "resultado": resultado,
+                "resumen": {
+                    "fecha": timezone.localdate().isoformat(),
+                    "monedas": ResumenTasaSerializer(filas, many=True).data,
+                },
+            },
+            status=status.HTTP_200_OK,
         )

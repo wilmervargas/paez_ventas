@@ -30,8 +30,8 @@ export async function updatePedido(id, payload) {
   return data;
 }
 
-export async function confirmarPedido(id) {
-  const { data } = await api.post(`/pedidos/${id}/confirmar/`, {});
+export async function confirmarPedido(id, payload = {}) {
+  const { data } = await api.post(`/pedidos/${id}/confirmar/`, payload);
   return data;
 }
 

@@ -51,7 +51,6 @@ INSTALLED_APPS = [
     "apps.purchases",
     "apps.orders",
     "apps.finances",
-    "apps.notifications",
     "apps.reports",
 ]
 
@@ -156,6 +155,7 @@ REFRESH_COOKIE_MAX_AGE = int(SIMPLE_JWT["REFRESH_TOKEN_LIFETIME"].total_seconds(
 
 CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", "http://localhost:5173")
 CORS_ALLOW_CREDENTIALS = True
+CORS_EXPOSE_HEADERS = ["Content-Disposition"]
 CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS", "http://localhost:5173")
 
 SPECTACULAR_SETTINGS = {
@@ -171,3 +171,8 @@ LOGGING = {
     "handlers": {"console": {"class": "logging.StreamHandler"}},
     "root": {"handlers": ["console"], "level": "INFO"},
 }
+
+# Servidor local de WhatsApp (ws/server, Express + Baileys).
+# El envío siempre lo dispara el usuario desde Deudas y Cobros.
+WHATSAPP_WS_URL = os.getenv("WHATSAPP_WS_URL", "http://127.0.0.1:3000").rstrip("/")
+WHATSAPP_TIMEOUT = int(os.getenv("WHATSAPP_TIMEOUT", "20"))

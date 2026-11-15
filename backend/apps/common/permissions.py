@@ -101,6 +101,14 @@ class IsAdminOrReadOnly(BasePermission):
         return user.rol == "admin"
 
 
+class IsSuperUser(BasePermission):
+    """Permite el acceso solo a superusuarios activos."""
+
+    def has_permission(self, request, view) -> bool:
+        user = request.user
+        return bool(user and user.is_authenticated and user.is_active and user.is_superuser)
+
+
 class ReadOnly(BasePermission):
     def has_permission(self, request, view) -> bool:
         return request.method in SAFE_METHODS

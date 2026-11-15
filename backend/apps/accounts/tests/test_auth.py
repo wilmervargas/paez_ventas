@@ -48,6 +48,19 @@ def test_me_devuelve_perfil_autenticado(api_client, user):
     assert response.data["rol"] == "vendedor"
 
 
+def test_perfil_guarda_telefono_sin_signo_mas(api_client, user):
+    access = _login(api_client, user.email).data["access"]
+    api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {access}")
+
+    response = api_client.patch(reverse("me"), {"telefono": "+58 414-1234567"}, format="json")
+
+    assert response.status_code == 200
+    assert response.data["telefono"] == "584141234567"
+
+    user.refresh_from_db()
+    assert user.telefono == "584141234567"
+
+
 def test_refresh_rota_el_token(api_client, user):
     login = _login(api_client, user.email)
     old_refresh = login.cookies[settings.REFRESH_COOKIE_NAME].value

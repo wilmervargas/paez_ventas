@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createTasa, deleteTasa, getResumenTasas, listTasas, updateTasa } from "./api";
+import { createTasa, deleteTasa, getResumenTasas, listTasas, sincronizarTasas, updateTasa } from "./api";
 export const ratesKeys = {
     all: ["tasas-cambio"],
     list: (params) => [...ratesKeys.all, "list", params],
@@ -37,6 +37,16 @@ export function useDeleteTasa() {
     const queryClient = useQueryClient();
     return useMutation({
         mutationFn: (id) => deleteTasa(id),
+        onSuccess: () => {
+            void queryClient.invalidateQueries({ queryKey: ratesKeys.all });
+        },
+    });
+}
+
+export function useSincronizarTasas() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: () => sincronizarTasas(),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: ratesKeys.all });
         },

@@ -8,6 +8,7 @@ import { Button } from "../../../components/ui/Button";
 import { Modal } from "../../../components/ui/Modal";
 import { TextArea } from "../../../components/ui/TextArea";
 import { getErrorMessage } from "../../../lib/errors";
+import { formatMoney } from "../../../lib/money";
 import { useAnularCompra } from "../hooks";
 const schema = z.object({
     motivo: z
@@ -33,7 +34,7 @@ export function AnularCompraModal({ compra, onClose }) {
             setError(getErrorMessage(err, "No se pudo anular la compra."));
         }
     });
-    return (<Modal open onClose={onClose} title={`Anular ${compra.numero}`} description={`${compra.proveedor_nombre} · ${compra.total} ${compra.moneda}`} footer={<div className="flex justify-end gap-2">
+    return (<Modal open onClose={onClose} title={`Anular ${compra.numero}`} description={`${compra.proveedor_nombre} · ${formatMoney(compra.total, compra.moneda)}`} footer={<div className="flex justify-end gap-2">
           <Button type="button" variant="secondary" onClick={onClose}>
             Cancelar
           </Button>

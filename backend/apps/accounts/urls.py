@@ -1,8 +1,12 @@
 """Rutas de autenticación."""
 
-from django.urls import path
+from django.urls import include, path
+from rest_framework.routers import DefaultRouter
 
-from .views import ChangePasswordView, LoginView, LogoutView, MeView, RefreshView
+from .views import AdminUserViewSet, ChangePasswordView, LoginView, LogoutView, MeView, RefreshView
+
+router = DefaultRouter()
+router.register("users", AdminUserViewSet, basename="admin-user")
 
 urlpatterns = [
     path("token/", LoginView.as_view(), name="login"),
@@ -10,4 +14,5 @@ urlpatterns = [
     path("logout/", LogoutView.as_view(), name="logout"),
     path("me/", MeView.as_view(), name="me"),
     path("change-password/", ChangePasswordView.as_view(), name="change-password"),
+    path("", include(router.urls)),
 ]

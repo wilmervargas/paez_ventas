@@ -25,6 +25,7 @@ CAMPOS_PEDIDO = (
     "moneda",
     "tasa_cambio",
     "tipo_pago",
+    "numero_cuotas",
     "descuento",
     "otros_montos",
     "numero_referencia",
@@ -196,20 +197,38 @@ def crear_pedido(data: dict, detalles: list[dict], user=None) -> Pedido:
     if "numero_referencia" in datos and datos["numero_referencia"] is not None:
         datos["numero_referencia"] = str(datos["numero_referencia"]).strip()
 
+    tipo_pago = datos.get("tipo_pago") or Pedido.TipoPago.CONTADO
+    try:
+        numero_cuotas = int(datos.get("numero_cuotas") or 1)
+    except (TypeError, ValueError):
+        numero_cuotas = 1
+    if tipo_pago == Pedido.TipoPago.CONTADO:
+        numero_cuotas = 1
+    numero_cuotas = max(1, min(8, numero_cuotas))
+    datos["tipo_pago"] = tipo_pago
+    datos["numero_cuotas"] = numero_cuotas
+
+    descuento_global = money(to_decimal(datos.get("descuento", 0)))
+    if descuento_global < 0:
+        raise BusinessRuleError("El descuento global no puede ser negativo.")
+
     normalizados = _normalizar_detalles(detalles, empresa.iva_rate)
 
     subtotal = Decimal("0.00")
     iva_total = Decimal("0.00")
-    descuento_total = Decimal("0.00")
+    descuento_lineas = Decimal("0.00")
     for detalle in normalizados:
         subtotal += detalle["subtotal"]
         iva_total += detalle["iva_linea"]
-        descuento_total += detalle["descuento_linea"]
+        descuento_lineas += detalle["descuento_linea"]
 
     subtotal = money(subtotal)
     iva_total = money(iva_total)
-    descuento_total = money(descuento_total)
-    total = money(subtotal + iva_total + otros_montos)
+    descuento_lineas = money(descuento_lineas)
+    descuento_total = money(descuento_lineas + descuento_global)
+    total = money(subtotal + iva_total + otros_montos - descuento_global)
+    if total < 0:
+        total = Decimal("0.00")
 
     # Congela la tasa BCV (Bs por 1 USD) vigente en la fecha del documento.
     tasa_bcv = get_tasa_del_dia("VES", fecha, base="USD")
@@ -294,6 +313,17 @@ def actualizar_pedido(pedido: Pedido, data: dict, detalles: list[dict] | None, u
     if "numero_referencia" in datos and datos["numero_referencia"] is not None:
         datos["numero_referencia"] = str(datos["numero_referencia"]).strip()
 
+    tipo_pago = datos.get("tipo_pago") or pedido.tipo_pago
+    try:
+        numero_cuotas = int(datos.get("numero_cuotas", pedido.numero_cuotas) or 1)
+    except (TypeError, ValueError):
+        numero_cuotas = pedido.numero_cuotas or 1
+    if tipo_pago == Pedido.TipoPago.CONTADO:
+        numero_cuotas = 1
+    numero_cuotas = max(1, min(8, numero_cuotas))
+    datos["tipo_pago"] = tipo_pago
+    datos["numero_cuotas"] = numero_cuotas
+
     if detalles is None:
         detalles = [
             {
@@ -308,20 +338,31 @@ def actualizar_pedido(pedido: Pedido, data: dict, detalles: list[dict] | None, u
             for d in pedido.detalles.select_related("producto", "combo")
         ]
 
+    descuento_global = money(to_decimal(datos.get("descuento", pedido.descuento)))
+    # `pedido.descuento` almacenado puede incluir descuentos de línea + global;
+    # si no se envía descuento, conservamos 0 como global adicional para no re-restar.
+    if "descuento" not in data:
+        descuento_global = Decimal("0.00")
+    if descuento_global < 0:
+        raise BusinessRuleError("El descuento global no puede ser negativo.")
+
     normalizados = _normalizar_detalles(detalles, empresa.iva_rate)
 
     subtotal = Decimal("0.00")
     iva_total = Decimal("0.00")
-    descuento_total = Decimal("0.00")
+    descuento_lineas = Decimal("0.00")
     for d in normalizados:
         subtotal += d["subtotal"]
         iva_total += d["iva_linea"]
-        descuento_total += d["descuento_linea"]
+        descuento_lineas += d["descuento_linea"]
 
     subtotal = money(subtotal)
     iva_total = money(iva_total)
-    descuento_total = money(descuento_total)
-    total = money(subtotal + iva_total + otros_montos)
+    descuento_lineas = money(descuento_lineas)
+    descuento_total = money(descuento_lineas + descuento_global)
+    total = money(subtotal + iva_total + otros_montos - descuento_global)
+    if total < 0:
+        total = Decimal("0.00")
 
     for campo, valor in datos.items():
         setattr(pedido, campo, valor)
@@ -368,7 +409,9 @@ def actualizar_pedido(pedido: Pedido, data: dict, detalles: list[dict] | None, u
 
 
 @transaction.atomic
-def confirmar_pedido(pedido: Pedido, user=None) -> Pedido:
+def confirmar_pedido(
+    pedido: Pedido, numero_cuotas: int = 1, fecha_vencimiento=None, user=None
+) -> Pedido:
     """Confirma el pedido: descuenta stock y, si es a crédito, crea la deuda."""
     pedido = Pedido.objects.select_for_update().get(pk=pedido.pk)
     if pedido.estado != Pedido.Estado.BORRADOR:
@@ -435,8 +478,12 @@ def confirmar_pedido(pedido: Pedido, user=None) -> Pedido:
     pedido.save(update_fields=["estado", "updated_at"])
 
     if pedido.tipo_pago == Pedido.TipoPago.CREDITO:
-        fecha_vencimiento = None
-        _crear_deuda_desde_pedido(pedido, fecha_vencimiento, user=user)
+        try:
+            n_cuotas = int(pedido.numero_cuotas or numero_cuotas or 1)
+        except (TypeError, ValueError):
+            n_cuotas = 1
+        n_cuotas = max(1, min(8, n_cuotas))
+        _crear_deuda_desde_pedido(pedido, fecha_vencimiento, numero_cuotas=n_cuotas, user=user)
 
     logger.info(
         "Pedidos: %s confirmado por %s (tipo_pago=%s)",
@@ -447,8 +494,12 @@ def confirmar_pedido(pedido: Pedido, user=None) -> Pedido:
     return pedido
 
 
-def _crear_deuda_desde_pedido(pedido: Pedido, fecha_vencimiento, user=None) -> Deuda:
-    """Crea la Deuda asociada a un pedido confirmado a crédito."""
+def _crear_deuda_desde_pedido(
+    pedido: Pedido, fecha_vencimiento, numero_cuotas: int = 1, user=None
+) -> Deuda:
+    """Crea la Deuda asociada a un pedido confirmado a crédito y su plan de cuotas."""
+    from apps.finances.services import crear_plan_cuotas
+
     empresa = get_empresa()
     moneda = pedido.moneda or empresa.moneda_base
     tasa = pedido.tasa_cambio or Decimal("1.000000")
@@ -469,11 +520,16 @@ def _crear_deuda_desde_pedido(pedido: Pedido, fecha_vencimiento, user=None) -> D
     )
     deuda.full_clean()
     deuda.save()
+
+    crear_plan_cuotas(deuda, numero_cuotas=numero_cuotas, fecha_base=pedido.fecha, user=user)
+    deuda.refresh_from_db()
+
     logger.info(
-        "Finanzas: deuda %s creada para pedido %s (cliente=%s)",
+        "Finanzas: deuda %s creada para pedido %s (cliente=%s, cuotas=%s)",
         deuda.id,
         pedido.numero,
         pedido.cliente.nombre,
+        numero_cuotas,
     )
     return deuda
 

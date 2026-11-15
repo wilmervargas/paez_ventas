@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Save } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 import { Alert } from "../../../components/ui/Alert";
@@ -8,6 +8,7 @@ import { Button } from "../../../components/ui/Button";
 import { Input } from "../../../components/ui/Input";
 import { Modal } from "../../../components/ui/Modal";
 import { Select } from "../../../components/ui/Select";
+import { toApiDecimal, toDisplayDecimal } from "../../../lib/decimal";
 import { getErrorMessage } from "../../../lib/errors";
 import { useSaveTasa } from "../hooks";
 const MONEDAS = ["USD", "EUR", "USDT"];
@@ -16,13 +17,17 @@ const schema = z.object({
     tasa: z
         .string()
         .trim()
-        .regex(/^\d{1,12}([.,]\d{1,6})?$/, "Usa un número, por ejemplo 36.50")
-        .refine((value) => Number(value.replace(",", ".")) > 0, "La tasa debe ser mayor que cero"),
+        .regex(/^\d{1,12}([.,]\d{1,2})?$/, "Usa un número con hasta 2 decimales, por ejemplo 36,50")
+        .refine((value) => Number(String(value).replace(",", ".")) > 0, "La tasa debe ser mayor que cero"),
     fuente: z.enum(["bcv", "usdt", "manual"]),
     vigente_desde: z
         .string()
         .min(1, "Indica la fecha y hora")
         .refine((value) => !Number.isNaN(new Date(value).getTime()), "Fecha inválida"),
+}).superRefine((values, ctx) => {
+    if (values.moneda_base === "USDT" && values.fuente === "bcv") {
+        ctx.addIssue({ code: "custom", path: ["fuente"], message: "USDT no usa fuente BCV." });
+    }
 });
 function pad(value) {
     return String(value).padStart(2, "0");
@@ -42,39 +47,63 @@ function monedaDe(tasa) {
     const base = tasa?.moneda_base ?? "USD";
     return MONEDAS.includes(base) ? base : "USD";
 }
-function toDefaults(tasa) {
+function fuenteParaBase(base, fuenteActual) {
+    if (base === "USDT") return fuenteActual === "manual" ? "manual" : "usdt";
+    return fuenteActual === "manual" ? "manual" : "bcv";
+}
+function toDefaults(tasa, previas) {
+    if (tasa) {
+        return {
+            moneda_base: monedaDe(tasa),
+            tasa: tasa?.tasa ? toDisplayDecimal(tasa.tasa, 2) : "",
+            fuente: fuenteParaBase(monedaDe(tasa), tasa?.fuente ?? "bcv"),
+            vigente_desde: toLocalInput(tasa.vigente_desde),
+        };
+    }
+    const base = "USD";
+    const previa = Array.isArray(previas) ? previas.find((p) => p.moneda === base) : null;
     return {
-        moneda_base: monedaDe(tasa),
-        tasa: tasa?.tasa ?? "",
-        fuente: tasa?.fuente ?? "bcv",
-        vigente_desde: tasa ? toLocalInput(tasa.vigente_desde) : nowLocalInput(),
+        moneda_base: base,
+        tasa: previa?.tasa ? toDisplayDecimal(previa.tasa, 2) : "",
+        fuente: fuenteParaBase(base, previa?.fuente ?? "bcv"),
+        vigente_desde: nowLocalInput(),
     };
 }
-export function TasaFormModal({ tasa, onClose }) {
+export function TasaFormModal({ tasa, previas, onClose }) {
     const [error, setError] = useState(null);
     const mutation = useSaveTasa();
-    const { register, handleSubmit, control, setValue, formState: { errors, isSubmitting }, } = useForm({
+    const { register, handleSubmit, control, setValue, getValues, formState: { errors, isSubmitting }, } = useForm({
         resolver: zodResolver(schema),
-        defaultValues: toDefaults(tasa),
+        defaultValues: toDefaults(tasa, previas),
     });
     const monedaBase = useWatch({ control, name: "moneda_base" });
     const fuente = useWatch({ control, name: "fuente" });
     const tasaValor = useWatch({ control, name: "tasa" });
-    // La fuente sigue a la moneda mientras se crea una tasa nueva; al corregir
-    // una existente se respeta lo que ya estaba registrado.
+    const monedaBaseInicial = useRef(monedaDe(tasa));
+
+    // Al cambiar de moneda (al crear o al corregir), traer los valores
+    // inmediatamente anteriores registrados para esa moneda.
     useEffect(() => {
-        if (tasa) {
+        // En corrección, conservar los valores originales al abrir el formulario.
+        if (tasa && monedaBase === monedaBaseInicial.current) {
             return;
         }
-        setValue("fuente", monedaBase === "USDT" ? "usdt" : "bcv");
-    }, [monedaBase, tasa, setValue]);
+        const previa = Array.isArray(previas) ? previas.find((p) => p.moneda === monedaBase) : null;
+        if (previa?.tasa) {
+            setValue("tasa", toDisplayDecimal(previa.tasa, 2));
+        } else {
+            setValue("tasa", "");
+        }
+        const fuenteActual = getValues("fuente");
+        setValue("fuente", fuenteParaBase(monedaBase, previa?.fuente ?? fuenteActual));
+    }, [monedaBase, tasa, previas, setValue, getValues]);
     const onSubmit = handleSubmit(async (values) => {
         setError(null);
         const payload = {
             moneda: "VES",
             moneda_base: values.moneda_base,
-            tasa: values.tasa.replace(",", "."),
-            fuente: values.fuente,
+            tasa: toApiDecimal(values.tasa, 2),
+            fuente: values.moneda_base === "USDT" && values.fuente === "bcv" ? "usdt" : values.fuente,
             vigente_desde: new Date(values.vigente_desde).toISOString(),
         };
         try {
@@ -110,10 +139,10 @@ export function TasaFormModal({ tasa, onClose }) {
             <option value="USDT">USDT</option>
           </Select>
 
-          <Input label="Tasa (Bs por 1 unidad) *" inputMode="decimal" placeholder="36.50" error={errors.tasa?.message} {...register("tasa")}/>
+          <Input label="Tasa (Bs por 1 unidad) *" inputMode="decimal" placeholder="36,50" error={errors.tasa?.message} {...register("tasa")}/>
 
           <Select label="Fuente *" error={errors.fuente?.message} {...register("fuente")}>
-            <option value="bcv">BCV</option>
+            {monedaBase !== "USDT" ? <option value="bcv">BCV</option> : null}
             <option value="usdt">USDT / paralelo</option>
             <option value="manual">Manual</option>
           </Select>

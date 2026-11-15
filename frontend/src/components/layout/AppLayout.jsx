@@ -11,7 +11,7 @@ export function AppLayout() {
 
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)}/>
 
-      <div className="lg:pl-72">
+      <div className="lg:pl-[12.6rem]">
         <Header onMenu={() => setSidebarOpen(true)}/>
         <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
           <CompanyGate>

@@ -36,7 +36,7 @@ import { ConfirmarPedidoModal } from "../components/ConfirmarPedidoModal";
 import { EntregarPedidoModal } from "../components/EntregarPedidoModal";
 import { PedidoDetailModal } from "../components/PedidoDetailModal";
 import { PedidoFormModal } from "../components/PedidoFormModal";
-import { usePedidos } from "../hooks";
+import { usePedidos, useTasaVigente } from "../hooks";
 
 const PAGE_SIZE = 25;
 const ESTADO_TONES = {
@@ -45,6 +45,78 @@ const ESTADO_TONES = {
   entregado: "success",
   anulado: "neutral",
 };
+
+function useTipoTasaPedido(pedido) {
+  const tasaDoc = Number(pedido.tasa_cambio || 0);
+  const tasaBcv = Number(pedido.tasa_bcv ?? 0);
+  const coincideBcv =
+    pedido.moneda === "VES" &&
+    Number.isFinite(tasaBcv) &&
+    tasaBcv > 0 &&
+    Math.abs(tasaDoc - tasaBcv) < 0.000001;
+  const necesitaInferir = pedido.moneda === "VES" && !coincideBcv;
+  const tasaEur = useTasaVigente("VES", "EUR", necesitaInferir ? pedido.fecha : "");
+  const tasaUsdt = useTasaVigente("VES", "USDT", necesitaInferir ? pedido.fecha : "");
+
+  if (coincideBcv) {
+    return { tipo: "usd_bcv", simbolo: "$", sufijo: "USD", listo: true };
+  }
+  if (pedido.moneda === "VES") {
+    if (tasaEur.data?.tasa && Math.abs(tasaDoc - Number(tasaEur.data.tasa)) < 0.000001) {
+      return { tipo: "eur_bcv", simbolo: "€", sufijo: "EUR", listo: true };
+    }
+    if (tasaUsdt.data?.tasa && Math.abs(tasaDoc - Number(tasaUsdt.data.tasa)) < 0.000001) {
+      return { tipo: "usdt", simbolo: "USDT", sufijo: "USDT", listo: true };
+    }
+    if (necesitaInferir && (!tasaEur.isFetched || !tasaUsdt.isFetched)) {
+      return { tipo: "pendiente", simbolo: null, sufijo: null, listo: false };
+    }
+    return { tipo: "ajuste", simbolo: null, sufijo: null, listo: true };
+  }
+  return { tipo: "otra", simbolo: pedido.moneda, sufijo: pedido.moneda, listo: true };
+}
+
+function TasaVentaLabel({ pedido }) {
+  const tasa = formatRate(pedido.tasa_cambio);
+  const info = useTipoTasaPedido(pedido);
+
+  if (info.tipo === "usd_bcv") return `Dólar BCV: ${tasa} por $1`;
+  if (info.tipo === "eur_bcv") return `Euro BCV: ${tasa} por 1 €`;
+  if (info.tipo === "usdt") return `USDT: ${tasa} por 1 USDT`;
+  if (info.tipo === "ajuste") return `Ajuste/Manual: ${tasa}`;
+  if (info.tipo === "pendiente") return `Tasa aplicada: ${tasa}`;
+  return `${pedido.moneda}: ${tasa}`;
+}
+
+function TotalesVenta({ pedido }) {
+  const info = useTipoTasaPedido(pedido);
+  const totalBs = pedido.total_ves ?? (pedido.moneda === "VES" ? pedido.total : null);
+  const tasaNum = Number(pedido.tasa_cambio || 0);
+  let equivalente = null;
+
+  if (totalBs != null && tasaNum > 0) {
+    const eq = Number(Number(totalBs) / tasaNum).toLocaleString("es-VE", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    if (info.tipo === "usd_bcv") {
+      equivalente = `$ ${eq}`;
+    } else if (info.tipo === "eur_bcv") {
+      equivalente = `€ ${eq}`;
+    } else if (info.tipo === "usdt") {
+      equivalente = `${eq} USDT`;
+    } else if (pedido.moneda === "VES") {
+      equivalente = `${eq} (tasa contratada)`;
+    }
+  }
+
+  return (
+    <div>
+      <p className="font-semibold text-slate-900">{formatMoney(pedido.total, pedido.moneda)}</p>
+      {equivalente ? <p className="text-xs text-slate-500">{equivalente}</p> : null}
+    </div>
+  );
+}
 
 export function PedidosPage() {
   const { user } = useAuth();
@@ -118,7 +190,7 @@ export function PedidosPage() {
 
       <Card>
         <div className="grid gap-3 border-b border-slate-100 p-4 sm:grid-cols-2 xl:grid-cols-5">
-          <div className="sm:col-span-2">
+          <div className="sm:col-span-2 xl:col-span-1">
             <Input
               label="Buscar"
               placeholder="Número, cliente o notas"
@@ -158,7 +230,7 @@ export function PedidosPage() {
               </option>
             ))}
           </Select>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3 xl:col-span-2">
             <Input
               label="Desde"
               type="date"
@@ -226,12 +298,10 @@ export function PedidosPage() {
                       <td className="px-3 py-3 text-slate-600">
                         <p>{formatDate(pedido.fecha)}</p>
                         <p className="text-xs text-slate-500">{pedido.tipo_pago_display}</p>
-                        <p className="text-xs text-slate-500">{pedido.moneda} · tasa {formatRate(pedido.tasa_cambio, pedido.moneda)}</p>
+                        <p className="text-xs text-slate-500"><TasaVentaLabel pedido={pedido} /></p>
                       </td>
                       <td className="px-3 py-3">
-                        <p className="font-semibold text-slate-900">
-                          {formatMoney(pedido.total, pedido.moneda)}
-                        </p>
+                        <TotalesVenta pedido={pedido} />
                       </td>
                       <td className="px-3 py-3">
                         <Badge tone={ESTADO_TONES[pedido.estado]}>{pedido.estado_display}</Badge>

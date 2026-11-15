@@ -20,3 +20,8 @@ export async function getResumenTasas(fecha) {
     });
     return data;
 }
+
+export async function sincronizarTasas() {
+    const { data } = await api.post("/tasas-cambio/sincronizar/");
+    return data;
+}

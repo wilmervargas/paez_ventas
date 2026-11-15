@@ -1,4 +1,4 @@
-import { ArrowRightLeft, Pencil, Plus, Trash2 } from "lucide-react";
+import { ArrowRightLeft, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Alert } from "../../../components/ui/Alert";
 import { Badge } from "../../../components/ui/Badge";
@@ -17,7 +17,7 @@ import { getErrorMessage } from "../../../lib/errors";
 import { formatRate } from "../../../lib/money";
 import { canManageRates } from "../../../lib/roles";
 import { TasaFormModal } from "./TasaFormModal";
-import { useDeleteTasa, useResumenTasas, useTasas } from "../hooks";
+import { useDeleteTasa, useResumenTasas, useSincronizarTasas, useTasas } from "../hooks";
 
 const PAGE_SIZE = 25;
 
@@ -44,6 +44,14 @@ function fuenteTone(fuente) {
 }
 
 function TarjetaResumen({ fila }) {
+  const amount = Number(fila.tasa);
+  const monto = Number.isFinite(amount)
+    ? new Intl.NumberFormat("es-VE", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(amount)
+    : "—";
+
   return (
     <Card className="p-5">
       <div className="flex items-start justify-between gap-3">
@@ -51,10 +59,15 @@ function TarjetaResumen({ fila }) {
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
             {MONEDA_LABEL[fila.moneda] ?? fila.moneda}
           </p>
-          <p className="mt-1 text-2xl font-bold text-slate-900">
-            {formatRate(fila.tasa)}
-            <span className="ml-1 text-sm font-medium text-slate-400">por 1 {fila.moneda}</span>
-          </p>
+          <div className="mt-1">
+            <p className="flex items-baseline gap-1 font-bold text-slate-900">
+              <span className="text-xl">Bs</span>
+              <span className="text-2xl">{monto}</span>
+            </p>
+            <p className="mt-0.5 text-sm font-medium text-slate-400">
+              por 1 {fila.moneda}
+            </p>
+          </div>
         </div>
         {fila.tasa ? (
           <Badge tone={fila.es_del_dia ? "success" : "warning"}>
@@ -88,6 +101,7 @@ export function RatesManager() {
   const [hasta, setHasta] = useState("");
   const [editing, setEditing] = useState(undefined);
   const [borrando, setBorrando] = useState(null);
+  const [syncMsg, setSyncMsg] = useState(null);
   const resumen = useResumenTasas();
   const { data, isLoading, isError, error } = useTasas({
     page,
@@ -100,6 +114,7 @@ export function RatesManager() {
     ordering: "-vigente_desde",
   });
   const deleteTasa = useDeleteTasa();
+  const syncTasas = useSincronizarTasas();
 
   async function confirmarBorrado() {
     if (!borrando) {
@@ -130,12 +145,36 @@ export function RatesManager() {
         description="Histórico diario del dólar BCV, el euro y el USDT. La última tasa registrada del día es la que aplica a compras y pedidos en bolívares."
         actions={
           puedeGestionar ? (
-            <Button onClick={() => setEditing(null)} icon={<Plus className="h-4 w-4" />}>
-              Registrar tasa
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="secondary"
+                onClick={async () => {
+                  setSyncMsg(null);
+                  try {
+                    const res = await syncTasas.mutateAsync();
+                    setSyncMsg(res?.detail || "Sincronización ejecutada.");
+                  } catch (err) {
+                    setSyncMsg(getErrorMessage(err, "No se pudo sincronizar las tasas."));
+                  }
+                }}
+                loading={syncTasas.isPending}
+                icon={<RefreshCw className="h-4 w-4" />}
+              >
+                Sincronizar ahora
+              </Button>
+              <Button onClick={() => setEditing(null)} icon={<Plus className="h-4 w-4" />}>
+                Registrar tasa
+              </Button>
+            </div>
           ) : null
         }
       />
+
+      {syncMsg ? (
+        <Alert tone={syncTasas.isError ? "error" : "success"} onClose={() => setSyncMsg(null)}>
+          {syncMsg}
+        </Alert>
+      ) : null}
 
       {resumen.isError ? (
         <Alert tone="error">
@@ -313,7 +352,12 @@ export function RatesManager() {
       </Card>
 
       {editing !== undefined ? (
-        <TasaFormModal key={editing?.id ?? "nueva"} tasa={editing} onClose={() => setEditing(undefined)} />
+        <TasaFormModal
+          key={editing?.id ?? "nueva"}
+          tasa={editing}
+          previas={resumen.data?.monedas ?? []}
+          onClose={() => setEditing(undefined)}
+        />
       ) : null}
 
       <ConfirmDialog

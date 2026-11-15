@@ -15,12 +15,12 @@ Sistema interno para una firma/empresa venezolana que gestiona:
 - Pedidos flexibles (productos sueltos + combos).
 - Cuentas por cobrar (deudas) y pagos/abonos.
 - Caja, gastos y reportes.
-- Recordatorios de cobro por WhatsApp mediante enlaces `wa.me`.
+- Avisos de cobro por WhatsApp (envío manual desde Deudas y Cobros).
 
 **Estado actual:** Fases 0, 1 y 2 completadas, y Fase 3 implementada en backend
 y frontend (compras, recepción de mercancía, costo promedio y anulación con
-reverso de inventario). Las apps restantes (`orders`, `finances`,
-`notifications`, `reports`) siguen como esqueleto.
+reverso de inventario). Las apps restantes (`orders`, `reports`) siguen como
+esqueleto.
 
 **No es multi-tenant.** Una instalación = una empresa (`Empresa` singleton).
 
@@ -35,7 +35,7 @@ reverso de inventario). Las apps restantes (`orders`, `finances`,
 | Frontend | React + Vite + TypeScript + Tailwind CSS |
 | Autenticación | JWT (`djangorestframework-simplejwt`) con login por email |
 | Moneda | **Multimoneda** con tasa de cambio histórica |
-| WhatsApp | **Solo enlaces `wa.me`** con mensaje prellenado. Sin envío automático |
+| WhatsApp | Servicio local `ws/` (Node + Baileys, sesión por QR). El envío siempre lo dispara el usuario; `wa.me` queda como opción manual |
 | Roles | Administrador, Vendedor, Cobrador, Almacenista |
 | Alcance | **Completo**: ventas, compras, inventario, CxC, caja, gastos, reportes |
 | Numeración | **Control interno** (no fiscal), secuencial por año |
@@ -102,7 +102,6 @@ paez/
 │   │   ├── purchases/              # Compras y recepción
 │   │   ├── orders/                 # Pedidos, detalles, devoluciones
 │   │   ├── finances/               # Deudas, pagos, gastos, caja
-│   │   ├── notifications/          # Plantillas y log de mensajes wa.me
 │   │   └── reports/                # Reportes y exportaciones
 │   │
 │   ├── media/                      # Logos y comprobantes (NO versionado)
@@ -135,8 +134,7 @@ paez/
             ├── rates/
             ├── orders/
             ├── finances/
-            ├── reports/
-            └── notifications/
+            └── reports/
 ```
 
 > `apps/accounts` reemplaza al `apps/authentication` del plan original para evitar confusión con `django.contrib.auth`.
@@ -152,6 +150,9 @@ Convenciones generales para todos los modelos:
 - Índices en campos de búsqueda y fechas.
 - `__str__` legible.
 - `Meta.ordering` explícito en listados.
+- **Teléfonos:** E.164 **sin el signo '+'** (`584141234567`). Se acepta `+58...`
+  como entrada, pero se guarda y se muestra solo con dígitos
+  (`common/utils/phone.py`).
 
 ### 5.1 accounts
 
@@ -216,7 +217,7 @@ Cliente
   codigo           unique
   nombre
   rif_cedula
-  telefono         E.164 (+58...)
+  telefono         E.164 sin '+' (584141234567)
   telefono_alt
   email
   direccion
@@ -391,25 +392,7 @@ Reglas:
 - No se puede anular una deuda con pagos aplicados.
 - Caja: no se puede registrar un pago en efectivo sin caja abierta.
 
-### 5.8 notifications
-
-```text
-PlantillaMensaje
-  nombre, canal (whatsapp), cuerpo con placeholders {cliente}, {saldo}, etc.
-  activo
-
-Notificacion
-  cliente, deuda (opcional), plantilla
-  telefono_destino
-  mensaje_final
-  estado generado | enviado_manual | descartado
-  created_by, created_at, enviado_at
-```
-
-- El sistema **no envía** mensajes: genera el texto y el enlace `https://wa.me/<E.164>?text=<urlencoded>`.
-- El usuario marca "enviado manual" para dejar registro.
-
-### 5.9 common
+### 5.8 common
 
 ```text
 Secuencia
@@ -509,9 +492,14 @@ CRUD /deudas/            GET  /deudas/vencidas/
 CRUD /pagos/             POST /pagos/{id}/anular/
 CRUD /gastos/
 GET/POST /caja/          POST /caja/{id}/cerrar/
-GET  /reportes/cxc/      GET /reportes/ventas/
-GET  /reportes/utilidad/ GET /reportes/inventario/
-GET  /notificaciones/    POST /notificaciones/{id}/marcar-enviada/
+GET  /reportes/ventas/   GET /reportes/cxc/
+GET  /reportes/inventario/ GET /reportes/utilidad/
+GET  /reportes/compras/  GET /reportes/cobranza/
+GET  /reportes/caja/     GET /reportes/movimientos/
+GET  /reportes/{tipo}/exportar/pdf/    (PDF)
+GET  /reportes/{tipo}/exportar/xlsx/   (Excel)
+GET  /whatsapp/estado/   GET  /deudas/{id}/mensaje-cobro/
+                         POST /deudas/{id}/enviar-cobro/
 ```
 
 Convenciones:
@@ -572,15 +560,25 @@ Convenciones:
 
 ---
 
-## 11. WhatsApp (`wa.me`)
+## 11. Teléfonos y avisos de cobro por WhatsApp
 
-- Normalizar teléfonos a **E.164** (`+58...`). Función única en `common/utils/phone.py`.
-- El backend genera `https://wa.me/<numero>?text=<mensaje urlencoded>`.
-- Plantillas en BD con placeholders: `{cliente}`, `{saldo}`, `{vencimiento}`, `{empresa}`, `{rif}`, `{instrucciones_pago}`.
-- Pantalla de cobranza: lista de deudas vencidas, mensaje previsualizado, botón "Abrir WhatsApp" y "Copiar".
-- Cada generación crea una `Notificacion`; el usuario puede marcarla como enviada.
-- **No se usan librerías no oficiales ni automatización de WhatsApp.**
-- No se envían mensajes sin acción del usuario.
+- Normalizar teléfonos a **E.164 sin el signo '+'** (`584141234567`). Se acepta
+  `+58...` como entrada, pero se guarda y se muestra solo con dígitos.
+  Función única en `common/utils/phone.py` (`normalize_phone` / `phone_digits`).
+- **Servicio local:** `ws/server` (Node + Express + Baileys) mantiene una sesión
+  vinculada por QR y expone `GET /api/whatsapp/status` y
+  `POST /api/whatsapp/send` (`{to, message}`). Escucha por defecto en
+  `http://127.0.0.1:3000`; se configura con `WHATSAPP_WS_URL` y
+  `WHATSAPP_TIMEOUT` en `backend/.env`.
+- Django consume ese servicio desde `apps/finances/whatsapp.py`. Nunca llama al
+  servidor de WhatsApp desde el frontend (evita CORS y exponer la sesión).
+- **Deudas y Cobros:** el botón «Cobrar» de cada deudor arma un mensaje con las
+  deudas pendientes del cliente y sus pagos recientes (hasta 10 deudas y 5
+  pagos). El usuario puede editarlo, enviarlo directo o abrir `wa.me` como
+  respaldo manual. Endpoints: `GET /deudas/{id}/mensaje-cobro/` y
+  `POST /deudas/{id}/enviar-cobro/`; el envío exige rol admin o cobrador.
+- **Siempre es acción explícita del usuario.** No hay envíos automáticos ni
+  masivos. La sesión/QR se gestiona en la consola del servicio `ws/`.
 
 ---
 
@@ -591,7 +589,7 @@ Comando idempotente `python manage.py bootstrap`:
 1. Verifica `.env`.
 2. Aplica migraciones.
 3. Crea el superusuario si no existe ningún usuario, leyendo `DJANGO_SUPERUSER_EMAIL` y `DJANGO_SUPERUSER_PASSWORD`.
-4. Crea datos semilla: métodos de pago, unidades, categorías, plantillas de mensajes, IVA por defecto.
+4. Crea datos semilla: métodos de pago, unidades, categorías, IVA por defecto.
 5. No sobrescribe datos existentes.
 
 - La base SQLite se crea con `migrate`; no se crea lógica de "detectar archivo" en `settings.py`.
@@ -721,15 +719,14 @@ Una tarea está terminada solo si:
 | 5 | Deudas + pagos + aplicaciones + recibos |
 | 6 | Caja + gastos |
 | 7 | Reportes + dashboard + exportaciones |
-| 8 | Notificaciones `wa.me` + plantillas |
-| 9 | Respaldos, hardening y despliegue |
+| 8 | Respaldos, hardening y despliegue |
 
 ---
 
 ## 19. Fuera de alcance
 
 - Facturación fiscal / imprenta digital / numeración legal.
-- Envío automático de WhatsApp (API oficial o librerías no oficiales).
+- Envío automático o masivo de mensajes sin acción del usuario.
 - Multi-empresa / multi-tenant.
 - PostgreSQL (por ahora).
 - App móvil nativa.
@@ -748,7 +745,7 @@ Una tarea está terminada solo si:
 | Sin moneda | Multimoneda con `TasaCambio` histórica | Contexto Venezuela |
 | `logo_url` externo | `ImageField` + `media/` | Evitar enlaces roto y SSRF |
 | Solo CxC | + compras, proveedores, caja, gastos | Alcance completo solicitado |
-| WhatsApp automático | `wa.me` manual + log | Viabilidad y ToS |
+| WhatsApp automático | Envío manual desde Deudas y Cobros vía servicio local `ws/` | Control del usuario y menor riesgo de ToS |
 | Superusuario hardcodeado | `bootstrap` + `.env` + cambio obligatorio | Seguridad |
 | Gate fiscal en frontend | Middleware backend `409` | No evitable |
 | React JS | React + TypeScript | Seguridad de tipos en dinero |

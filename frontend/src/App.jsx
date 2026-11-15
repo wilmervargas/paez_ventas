@@ -4,6 +4,7 @@ import { ProtectedRoute } from "./components/ProtectedRoute";
 import { RoleGuard } from "./components/RoleGuard";
 import { AppLayout } from "./components/layout/AppLayout";
 import { FullPageLoader } from "./components/ui/Spinner";
+import { REPORT_ROLES } from "./features/reports/config";
 const LoginPage = lazy(() => import("./features/auth/LoginPage").then((module) => ({ default: module.LoginPage })));
 const ChangePasswordPage = lazy(() => import("./features/auth/ChangePasswordPage").then((module) => ({
     default: module.ChangePasswordPage,
@@ -29,8 +30,32 @@ const ComprasPage = lazy(() => import("./features/purchases/pages/ComprasPage").
 const PedidosPage = lazy(() => import("./features/orders/pages/PedidosPage").then((module) => ({
     default: module.PedidosPage,
 })));
+const DeudoresPage = lazy(() => import("./features/finances/pages/DeudoresPage").then((module) => ({
+    default: module.DeudoresPage,
+})));
+const CajaPage = lazy(() => import("./features/finances/pages/CajaPage").then((module) => ({
+    default: module.CajaPage,
+})));
+const WhatsAppPage = lazy(() => import("./features/whatsapp/pages/WhatsAppPage").then((module) => ({
+    default: module.WhatsAppPage,
+})));
+const RatesPage = lazy(() => import("./features/rates/pages/RatesPage").then((module) => ({
+    default: module.RatesPage,
+})));
+const UsuariosPage = lazy(() => import("./features/users/pages/UsuariosPage").then((module) => ({
+    default: module.UsuariosPage,
+})));
+const MantenimientoPage = lazy(() => import("./features/system/pages/MantenimientoPage").then((module) => ({
+    default: module.MantenimientoPage,
+})));
 const NotFoundPage = lazy(() => import("./features/errors/NotFoundPage").then((module) => ({
     default: module.NotFoundPage,
+})));
+const ReportesPage = lazy(() => import("./features/reports/pages/ReportesPage").then((module) => ({
+    default: module.ReportesPage,
+})));
+const ReporteDetallePage = lazy(() => import("./features/reports/pages/ReporteDetallePage").then((module) => ({
+    default: module.ReporteDetalleRoute,
 })));
 export default function App() {
     return (<Suspense fallback={<div className="grid min-h-screen place-items-center bg-slate-100">
@@ -60,7 +85,30 @@ export default function App() {
           <Route path="pedidos" element={<RoleGuard roles={["admin", "vendedor", "almacenista"]}>
                 <PedidosPage />
               </RoleGuard>}/>
-          <Route path="tasas" element={<Navigate to="/app" replace />} />
+          <Route path="deudas" element={<RoleGuard roles={["admin", "vendedor", "cobrador"]}>
+                <DeudoresPage />
+              </RoleGuard>}/>
+          <Route path="caja" element={<RoleGuard roles={["admin", "cobrador"]}>
+                <CajaPage />
+              </RoleGuard>}/>
+          <Route path="whatsapp" element={<RoleGuard roles={["admin", "cobrador"]}>
+                <WhatsAppPage />
+              </RoleGuard>}/>
+          <Route path="tasas" element={<RoleGuard roles={["admin"]}>
+                <RatesPage />
+              </RoleGuard>}/>
+          <Route path="reportes" element={<RoleGuard roles={REPORT_ROLES}>
+                <ReportesPage />
+              </RoleGuard>}/>
+          <Route path="reportes/:tipo" element={<RoleGuard roles={REPORT_ROLES}>
+                <ReporteDetallePage />
+              </RoleGuard>}/>
+          <Route path="usuarios" element={<RoleGuard superuserOnly>
+                <UsuariosPage />
+              </RoleGuard>}/>
+          <Route path="mantenimiento" element={<RoleGuard superuserOnly>
+                <MantenimientoPage />
+              </RoleGuard>}/>
           <Route path="*" element={<NotFoundPage />}/>
         </Route>
 

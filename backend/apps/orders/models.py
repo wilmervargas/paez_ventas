@@ -45,6 +45,7 @@ class Pedido(BaseModel):
         choices=TipoPago.choices,
         default=TipoPago.CONTADO,
     )
+    numero_cuotas = models.PositiveSmallIntegerField("número de cuotas", default=1)
     moneda = models.CharField("moneda", max_length=3, default="USD")
     tasa_cambio = models.DecimalField(
         "tasa de cambio",
@@ -109,6 +110,12 @@ class Pedido(BaseModel):
             models.Index(fields=("estado", "-fecha"), name="pedido_estado_fecha_idx"),
             models.Index(fields=("cliente", "-fecha"), name="pedido_cliente_fecha_idx"),
         ]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(numero_cuotas__gte=1) & models.Q(numero_cuotas__lte=8),
+                name="pedido_numero_cuotas_rango",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"{self.numero} · {self.cliente.nombre}"
@@ -133,6 +140,10 @@ class Pedido(BaseModel):
             valor = getattr(self, campo)
             if valor is not None and valor < 0:
                 errors[campo] = "El monto no puede ser negativo."
+        if self.numero_cuotas is not None and (self.numero_cuotas < 1 or self.numero_cuotas > 8):
+            errors["numero_cuotas"] = "El número de cuotas debe estar entre 1 y 8."
+        if self.tipo_pago == self.TipoPago.CONTADO and self.numero_cuotas != 1:
+            errors["numero_cuotas"] = "Los pedidos de contado deben tener 1 cuota."
         if errors:
             raise ValidationError(errors)
 
