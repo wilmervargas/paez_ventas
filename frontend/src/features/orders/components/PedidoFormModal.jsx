@@ -128,7 +128,7 @@ function toDefaults(pedido) {
     cliente: "",
     fecha: todayISO(),
     numero_referencia: "",
-    tipo_pago: "contado",
+    tipo_pago: "credito",
     numero_cuotas: 1,
     modo_tasa: "usd_bcv",
     tasa_monto: "",
@@ -328,8 +328,8 @@ export function PedidoFormModal({ pedido, clientes, productos, combos, onClose }
           <Input label="Número de pedido" placeholder="Referencia del cliente/pedido" error={errors.numero_referencia?.message} {...register("numero_referencia")} />
           <div className="grid grid-cols-2 gap-3">
             <Select label="Tipo de pago *" error={errors.tipo_pago?.message} {...register("tipo_pago")}>
-              <option value="contado">Contado</option>
               <option value="credito">Crédito</option>
+              <option value="contado">Contado</option>
             </Select>
             <Select
               label="Cuotas *"

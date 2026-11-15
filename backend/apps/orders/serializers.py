@@ -145,6 +145,8 @@ class PedidoSerializer(serializers.ModelSerializer):
         choices=Pedido.TipoPago.choices, required=False, default=Pedido.TipoPago.CONTADO
     )
     numero_cuotas = serializers.IntegerField(required=False, min_value=1, max_value=8, default=1)
+    fecha_primera_cuota = serializers.DateField(required=False, allow_null=True)
+    plan_cuotas = serializers.JSONField(required=False)
 
     class Meta:
         model = Pedido
@@ -165,6 +167,8 @@ class PedidoSerializer(serializers.ModelSerializer):
             "tipo_pago",
             "tipo_pago_display",
             "numero_cuotas",
+            "fecha_primera_cuota",
+            "plan_cuotas",
             "subtotal",
             "descuento",
             "otros_montos",
@@ -332,6 +336,8 @@ class ConfirmarPedidoSerializer(serializers.Serializer):
 
     numero_cuotas = serializers.IntegerField(required=False, min_value=1, max_value=8)
     fecha_vencimiento = serializers.DateField(required=False, allow_null=True)
+    fecha_primera_cuota = serializers.DateField(required=False, allow_null=True)
+    plan_cuotas = serializers.JSONField(required=False)
 
     def save(self, **kwargs):
         pedido = self.context["pedido"]
@@ -339,6 +345,8 @@ class ConfirmarPedidoSerializer(serializers.Serializer):
             pedido,
             numero_cuotas=self.validated_data.get("numero_cuotas"),
             fecha_vencimiento=self.validated_data.get("fecha_vencimiento"),
+            fecha_primera_cuota=self.validated_data.get("fecha_primera_cuota"),
+            plan_cuotas=self.validated_data.get("plan_cuotas"),
             user=self.context["request"].user,
         )
 

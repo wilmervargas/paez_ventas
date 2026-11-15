@@ -31,12 +31,13 @@ import {
 } from "../../../lib/roles";
 import { useClientes } from "../../clients/hooks";
 import { useCombos, useProductos } from "../../inventory/hooks";
+import { RegistrarPagoModal } from "../../finances/components/RegistrarPagoModal";
 import { AnularPedidoModal } from "../components/AnularPedidoModal";
 import { ConfirmarPedidoModal } from "../components/ConfirmarPedidoModal";
 import { EntregarPedidoModal } from "../components/EntregarPedidoModal";
 import { PedidoDetailModal } from "../components/PedidoDetailModal";
 import { PedidoFormModal } from "../components/PedidoFormModal";
-import { usePedidos, useTasaVigente } from "../hooks";
+import { usePedidos, usePrepararCobroContado, useTasaVigente } from "../hooks";
 
 const PAGE_SIZE = 25;
 const ESTADO_TONES = {
@@ -136,6 +137,10 @@ export function PedidosPage() {
   const [confirmando, setConfirmando] = useState(null);
   const [entregando, setEntregando] = useState(null);
   const [anulando, setAnulando] = useState(null);
+  const [cobroContadoPedido, setCobroContadoPedido] = useState(null);
+  const [cobroContadoDeuda, setCobroContadoDeuda] = useState(null);
+  const [cobroError, setCobroError] = useState(null);
+  const prepararCobro = usePrepararCobroContado();
 
   const deferredSearch = useDeferredValue(search);
 
@@ -252,6 +257,11 @@ export function PedidosPage() {
           </div>
         </div>
 
+        {cobroError ? (
+          <div className="px-4 pt-4">
+            <Alert tone="error">{cobroError}</Alert>
+          </div>
+        ) : null}
         {isLoading ? (
           <PageLoader label="Cargando pedidos..." />
         ) : isError ? (
@@ -330,7 +340,20 @@ export function PedidosPage() {
                             <Button
                               variant="ghost"
                               className="p-2 text-emerald-600 hover:bg-emerald-50"
-                              onClick={() => setConfirmando(pedido)}
+                              onClick={() => {
+                                if (pedido.tipo_pago === "contado") {
+                                  setCobroError(null);
+                                  setCobroContadoPedido(pedido);
+                                  prepararCobro
+                                    .mutateAsync(pedido.id)
+                                    .then((deuda) => setCobroContadoDeuda(deuda))
+                                    .catch((err) =>
+                                      setCobroError(getErrorMessage(err, "No se pudo preparar el cobro.")),
+                                    );
+                                } else {
+                                  setConfirmando(pedido);
+                                }
+                              }}
                               title="Confirmar pedido"
                               aria-label={`Confirmar ${pedido.numero}`}
                               icon={<CheckCircle2 className="h-4 w-4" />}
@@ -403,12 +426,31 @@ export function PedidosPage() {
 
       {detail ? <PedidoDetailModal pedido={detail} onClose={() => setDetail(null)} /> : null}
 
+      {cobroContadoDeuda ? (
+        <RegistrarPagoModal
+          deuda={cobroContadoDeuda}
+          onClose={() => {
+            const pedido = cobroContadoPedido;
+            setCobroContadoDeuda(null);
+            setCobroContadoPedido(null);
+            if (pedido) setConfirmando(pedido);
+          }}
+        />
+      ) : null}
+
       {confirmando ? (
         <ConfirmarPedidoModal
           pedido={confirmando}
           onClose={() => {
             setConfirmando(null);
             setDetail(null);
+          }}
+          onConfirmed={(pedidoConfirmado) => {
+            setConfirmando(null);
+            setDetail(null);
+            if (pedidoConfirmado?.estado === "confirmado") {
+              setEntregando(pedidoConfirmado);
+            }
           }}
         />
       ) : null}

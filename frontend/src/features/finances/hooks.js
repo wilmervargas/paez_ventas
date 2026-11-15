@@ -35,13 +35,15 @@ export function useRegistrarPago() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: registrarPago,
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["deudores-pendientes"] });
-      qc.invalidateQueries({ queryKey: ["deudas"] });
-      qc.invalidateQueries({ queryKey: ["deuda"] });
-      qc.invalidateQueries({ queryKey: ["pagos"] });
-      qc.invalidateQueries({ queryKey: ["caja-actual"] });
-      qc.invalidateQueries({ queryKey: ["caja-sesiones"] });
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["deudores-pendientes"] }),
+        qc.invalidateQueries({ queryKey: ["deudas"] }),
+        qc.invalidateQueries({ queryKey: ["deuda"] }),
+        qc.invalidateQueries({ queryKey: ["pagos"] }),
+        qc.invalidateQueries({ queryKey: ["caja-actual"] }),
+        qc.invalidateQueries({ queryKey: ["caja-sesiones"] }),
+      ]);
     },
   });
 }

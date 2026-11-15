@@ -2,12 +2,16 @@
 
 import json
 import logging
+import os
+import tempfile
+import zipfile
 from datetime import date, datetime, time
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from django.conf import settings
+from django.core.mail import EmailMessage
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
@@ -484,5 +488,55 @@ def limpiar_base_datos(*, requested_by) -> dict[str, int]:
                 optimizado = False
         deleted["_optimizacion"] = 1 if optimizado else 0
 
-    logger.warning("Base de datos depurada por %s. Eliminados: %s", email, deleted)
+    logger.warning(
+        "Base de datos depurada por %s. Eliminados: %s",
+        getattr(requested_by, "email", "sistema"),
+        deleted,
+    )
     return deleted
+
+
+def hacer_respaldo_base_datos(*, requested_by, destinatario: str = "danielpaez.dell@gmail.com") -> dict:
+    """Comprime db.sqlite3 y lo envía por correo, conservando intacto el archivo original."""
+    if not getattr(requested_by, "is_superuser", False):
+        raise PermissionError("Solo los superusuarios pueden generar respaldos.")
+
+    db_path = settings.DATABASES["default"]["NAME"]
+    db_path = str(db_path)
+    if not os.path.exists(db_path):
+        raise FileNotFoundError("No se encontró el archivo de base de datos.")
+
+    fecha = timezone.localdate().strftime("%Y-%m-%d")
+    nombre_zip = f"respaldo-db-{fecha}.zip"
+    asunto = f"Respaldo base de datos - {fecha}"
+    cuerpo = (
+        f"Respaldo de la base de datos generado el {fecha}.\n\n"
+        f"Solicitado por: {getattr(requested_by, 'email', 'sistema')}\n"
+        "El archivo original db.sqlite3 permanece intacto en el servidor."
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        zip_path = os.path.join(tmpdir, nombre_zip)
+        # Copia comprimida del archivo; no se modifica ni mueve el original.
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.write(db_path, arcname=os.path.basename(db_path))
+
+        email = EmailMessage(
+            subject=asunto,
+            body=cuerpo,
+            from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
+            to=[destinatario],
+        )
+        email.attach_file(zip_path)
+        enviados = email.send(fail_silently=False)
+
+    if not enviados:
+        raise RuntimeError("No se pudo enviar el correo de respaldo.")
+
+    logger.info(
+        "Respaldo de BD generado y enviado a %s por %s (%s)",
+        destinatario,
+        getattr(requested_by, "email", "sistema"),
+        nombre_zip,
+    )
+    return {"destinatario": destinatario, "archivo": nombre_zip, "fecha": fecha}

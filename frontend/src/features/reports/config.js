@@ -16,6 +16,7 @@ export const MONEDAS = [
   { value: "USD", label: "USD — Dólar" },
   { value: "VES", label: "VES — Bolívar" },
   { value: "EUR", label: "EUR — Euro" },
+  { value: "USDT", label: "USDT — Tether" },
 ];
 
 const ESTADOS_PEDIDO = [
@@ -157,7 +158,7 @@ export const REPORTES = [
     tipo: "compras",
     label: "Compras",
     titulo: "Reporte de compras",
-    descripcion: "Compras a proveedores y su equivalente en moneda base.",
+    descripcion: "Compras a proveedores registradas en el período.",
     icon: Truck,
     roles: ["admin", "almacenista"],
     filtros: [
@@ -172,7 +173,7 @@ export const REPORTES = [
     tipo: "cobranza",
     label: "Cobranza",
     titulo: "Reporte de cobranza",
-    descripcion: "Pagos recibidos, métodos de cobro y consolidación en moneda base.",
+    descripcion: "Pagos recibidos y métodos de cobro del período.",
     icon: CreditCard,
     roles: ["admin", "cobrador"],
     filtros: [

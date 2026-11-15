@@ -147,6 +147,8 @@ class DeudaSerializer(serializers.ModelSerializer):
             "pedido_fecha",
             "moneda",
             "tasa_cambio",
+            "tasa_bcv",
+            "tasa_bcv_vigente_desde",
             "monto_original",
             "saldo",
             "monto_pagado",

@@ -49,40 +49,91 @@ def crear_plan_cuotas(
     fecha_base: date | None = None,
     periodicidad_dias: int | None = 30,
     user=None,
+    plan=None,
 ) -> list[Cuota]:
-    """Crea el plan de cuotas para una deuda (1..8). Idempotente si ya existen."""
+    """Crea el plan de cuotas para una deuda (1..8). Idempotente si ya existen.
+
+    Si `plan` se indica, se usa como fuente (lista de {numero, fecha_vencimiento, monto})
+    y se ajusta automáticamente para cuadrar con `deuda.monto_original`.
+    """
     if deuda.cuotas.exists():
         return list(deuda.cuotas.order_by("numero"))
-
-    try:
-        n = int(numero_cuotas)
-    except (TypeError, ValueError):
-        n = 1
-    if n < 1 or n > 8:
-        raise BusinessRuleError("El número de cuotas debe estar entre 1 y 8.")
 
     total = money(deuda.monto_original)
     base_fecha = fecha_base or deuda.fecha_emision or timezone.localdate()
 
-    # Distribución: últimas cuotas absorben residuo de redondeo.
-    monto_base = (to_decimal(total) / Decimal(n)).quantize(TWO, rounding=ROUND_HALF_UP)
-    montos = [monto_base for _ in range(n)]
-    montos[-1] = money(to_decimal(total) - sum(montos[:-1], Decimal("0.00")))
-    if montos[-1] < 0:
+    if plan:
+        entradas = [p for p in plan if isinstance(p, dict)]
+        n = len(entradas) or int(numero_cuotas or 1)
+    else:
+        entradas = []
+        try:
+            n = int(numero_cuotas)
+        except (TypeError, ValueError):
+            n = 1
+    if n < 1 or n > 8:
+        raise BusinessRuleError("El número de cuotas debe estar entre 1 y 8.")
+
+    montos = []
+    fechas = []
+    for i in range(n):
+        entrada = entradas[i] if i < len(entradas) else {}
+        monto_raw = entrada.get("monto") if isinstance(entrada, dict) else None
+        fecha_raw = entrada.get("fecha_vencimiento") if isinstance(entrada, dict) else None
+        if monto_raw in (None, ""):
+            montos.append(None)
+        else:
+            montos.append(money(monto_raw))
+        if fecha_raw in (None, ""):
+            if periodicidad_dias:
+                venc = base_fecha + timedelta(days=periodicidad_dias * (i + 1))
+            else:
+                venc = _add_months(base_fecha, i + 1)
+        else:
+            try:
+                venc = date.fromisoformat(str(fecha_raw))
+            except Exception as exc:
+                raise BusinessRuleError("La fecha de vencimiento de una cuota no es válida.") from exc
+        fechas.append(venc)
+
+    base_monto = (to_decimal(total) / Decimal(n)).quantize(TWO, rounding=ROUND_HALF_UP)
+    calculados = []
+    acumulado = Decimal("0.00")
+    for i in range(n):
+        if i == n - 1:
+            monto = money(to_decimal(total) - acumulado)
+        else:
+            monto = montos[i] if montos[i] is not None else base_monto
+            if monto < 0:
+                monto = Decimal("0.00")
+            monto = money(monto)
+            acumulado = money(acumulado + monto)
+        calculados.append(monto)
+
+    suma = sum(calculados, Decimal("0.00"))
+    diff = money(total - suma)
+    if diff != Decimal("0.00") and calculados:
+        ajustado = money(calculados[-1] + diff)
+        if ajustado < 0:
+            calculados[-1] = Decimal("0.00")
+            suma = sum(calculados, Decimal("0.00"))
+            diff = money(total - suma)
+            idx = max(range(len(calculados)), key=lambda k: calculados[k])
+            calculados[idx] = money(calculados[idx] + diff)
+        else:
+            calculados[-1] = ajustado
+
+    if any(m < 0 for m in calculados):
         raise BusinessRuleError("No se pudo distribuir el monto en cuotas.")
 
     cuotas = []
     for i in range(1, n + 1):
-        if periodicidad_dias:
-            venc = base_fecha + timedelta(days=periodicidad_dias * i)
-        else:
-            venc = _add_months(base_fecha, i)
         cuota = Cuota(
             deuda=deuda,
             numero=i,
-            monto=montos[i - 1],
-            saldo=montos[i - 1],
-            fecha_vencimiento=venc,
+            monto=calculados[i - 1],
+            saldo=calculados[i - 1],
+            fecha_vencimiento=fechas[i - 1],
             estado=Cuota.Estado.PENDIENTE,
             created_by=user if user and getattr(user, "is_authenticated", False) else None,
         )
@@ -90,7 +141,6 @@ def crear_plan_cuotas(
         cuotas.append(cuota)
     Cuota.objects.bulk_create(cuotas)
 
-    # fecha_vencimiento de la deuda = última cuota
     if cuotas:
         deuda.fecha_vencimiento = cuotas[-1].fecha_vencimiento
         deuda.save(update_fields=["fecha_vencimiento", "updated_at"])

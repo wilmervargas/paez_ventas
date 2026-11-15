@@ -7,7 +7,7 @@ export function MensajePruebaModal({
   onClose,
   initialTo = "",
   initialMessage = "",
-  title = "Enviar mensaje de prueba",
+  title = "Enviar mensaje por WhatsApp",
 }) {
   return (
     <Modal

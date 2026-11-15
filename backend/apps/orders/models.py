@@ -90,6 +90,16 @@ class Pedido(BaseModel):
         max_length=50,
         blank=True,
     )
+    fecha_primera_cuota = models.DateField(
+        "fecha primera cuota",
+        null=True,
+        blank=True,
+    )
+    plan_cuotas = models.JSONField(
+        "plan de cuotas",
+        default=list,
+        blank=True,
+    )
     notas = models.TextField("notas", blank=True)
     anulado_por = models.ForeignKey(
         "accounts.User",

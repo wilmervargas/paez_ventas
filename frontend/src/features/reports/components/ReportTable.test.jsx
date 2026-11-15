@@ -35,7 +35,7 @@ describe("formatCelda", () => {
   });
 
   it("formatea cantidades y porcentajes", () => {
-    expect(formatCelda("12.500", { type: "qty" }, {}, "USD")).toBe("12,5");
+    expect(formatCelda("12.500", { type: "qty" }, {}, "USD")).toBe("12,50");
     expect(formatCelda("37.25", { type: "percent" }, {}, "USD")).toBe("37,25 %");
   });
 });

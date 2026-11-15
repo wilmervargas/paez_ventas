@@ -1,5 +1,6 @@
 """Vistas de empresa y tasas de cambio."""
 
+import logging
 from datetime import datetime
 
 from django.utils import timezone
@@ -10,6 +11,8 @@ from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+logger = logging.getLogger(__name__)
 
 from apps.common.permissions import (
     IsAdmin,
@@ -25,6 +28,7 @@ from .services import (
     get_empresa,
     get_resumen_tasas,
     get_tasa_del_dia,
+    hacer_respaldo_base_datos,
     limpiar_base_datos,
     sincronizar_tasas_externas,
     upsert_empresa,
@@ -117,6 +121,57 @@ class LimpiarBaseDatosView(APIView):
             {
                 "detail": "Base de datos depurada correctamente.",
                 "deleted": deleted,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class RespaldoBaseDatosView(APIView):
+    """Genera un respaldo comprimido de la BD y lo envía por correo."""
+
+    permission_classes = [IsAuthenticatedAndCompanyReady]
+
+    @extend_schema(request=None, responses={200: dict})
+    def post(self, request):
+        if not getattr(request.user, "is_superuser", False):
+            return Response(
+                {
+                    "detail": "Solo los superusuarios pueden generar respaldos.",
+                    "code": "forbidden",
+                    "errors": {},
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        try:
+            info = hacer_respaldo_base_datos(requested_by=request.user)
+        except PermissionError:
+            return Response(
+                {
+                    "detail": "Solo los superusuarios pueden generar respaldos.",
+                    "code": "forbidden",
+                    "errors": {},
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        except FileNotFoundError as exc:
+            return Response(
+                {"detail": str(exc), "code": "db_not_found", "errors": {}},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except Exception:
+            logger.exception("Respaldo: error al generar/enviar el respaldo")
+            return Response(
+                {
+                    "detail": "No se pudo generar o enviar el respaldo. Verifica la configuración de correo.",
+                    "code": "backup_failed",
+                    "errors": {},
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        return Response(
+            {
+                "detail": f"Respaldo generado y enviado a {info['destinatario']}.",
+                **info,
             },
             status=status.HTTP_200_OK,
         )

@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+﻿import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { RoleGuard } from "./components/RoleGuard";
@@ -6,6 +6,12 @@ import { AppLayout } from "./components/layout/AppLayout";
 import { FullPageLoader } from "./components/ui/Spinner";
 import { REPORT_ROLES } from "./features/reports/config";
 const LoginPage = lazy(() => import("./features/auth/LoginPage").then((module) => ({ default: module.LoginPage })));
+const ForgotPasswordPage = lazy(() => import("./features/auth/ForgotPasswordPage").then((module) => ({
+    default: module.ForgotPasswordPage,
+})));
+const ResetPasswordPage = lazy(() => import("./features/auth/ResetPasswordPage").then((module) => ({
+    default: module.ResetPasswordPage,
+})));
 const ChangePasswordPage = lazy(() => import("./features/auth/ChangePasswordPage").then((module) => ({
     default: module.ChangePasswordPage,
 })));
@@ -63,6 +69,8 @@ export default function App() {
         </div>}>
       <Routes>
         <Route path="/login" element={<LoginPage />}/>
+        <Route path="/forgot-password" element={<ForgotPasswordPage />}/>
+        <Route path="/reset-password" element={<ResetPasswordPage />}/>
 
         <Route path="/app" element={<ProtectedRoute>
               <AppLayout />

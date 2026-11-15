@@ -14,8 +14,8 @@ from django.utils import timezone
 
 from apps.clients.models import Cliente, Proveedor
 from apps.common.utils.money import money, to_base, to_decimal
-from apps.company.services import get_empresa, get_moneda_base
-from apps.finances.models import CajaSesion, Deuda, Pago
+from apps.company.services import get_empresa, get_moneda_base, get_tasa_del_dia
+from apps.finances.models import CajaSesion, Cuota, Deuda, Pago
 from apps.inventory.models import MovimientoInventario, Producto
 from apps.orders.models import Pedido, PedidoDetalle
 from apps.purchases.models import Compra
@@ -42,11 +42,11 @@ def _money(value) -> str:
 
 
 def _qty(value) -> str:
-    return _q(value, THREE)
+    return _q(value, TWO)
 
 
 def _rate(value) -> str:
-    return _q(value or Decimal("1"), SIX)
+    return _q(value or Decimal("1"), TWO)
 
 
 def _percent(value) -> str:
@@ -69,6 +69,21 @@ def _fecha_corta(value: date | datetime | None) -> str:
     if not value:
         return ""
     return value.strftime("%d/%m/%Y")
+
+
+MONEDA_LABEL = {
+    "USD": "Dólar",
+    "VES": "Bolívar",
+    "EUR": "Euro",
+    "USDT": "USDT",
+}
+
+
+def _moneda_label(moneda: str | None) -> str:
+    if not moneda:
+        return ""
+    codigo = str(moneda).upper()
+    return MONEDA_LABEL.get(codigo, codigo)
 
 
 def _filtros_aplicados(filtros: dict, extra: list[tuple[str, str]] | None = None) -> list[dict]:
@@ -192,8 +207,65 @@ def _resumen_item(label: str, value, tipo: str = "money", currency: str = "base"
 # ---------------------------------------------------------------------------
 
 
+def _etiqueta_moneda_calculo(documento, cache_tasas: dict, fecha=None) -> str:
+    """Etiqueta de la tasa/moneda de cálculo usada al contratar el documento.
+
+    Coincide con las opciones del formulario (p. ej. pedidos): Dólar BCV,
+    Euro BCV, USDT o Ajuste (manual). Aplica a documentos con tasa_cambio en VES.
+    """
+    tasa_doc = to_decimal(getattr(documento, "tasa_cambio", None) or Decimal("0"))
+    moneda = str(getattr(documento, "moneda", "") or "").upper()
+    tol = Decimal("0.000001")
+
+    tasa_bcv = getattr(documento, "tasa_bcv", None)
+    if tasa_bcv is not None and abs(tasa_doc - to_decimal(tasa_bcv)) <= tol:
+        return "Dólar BCV"
+
+    if fecha is None:
+        fecha = (
+            getattr(documento, "fecha", None)
+            or getattr(documento, "fecha_emision", None)
+            or getattr(documento, "fecha_pago", None)
+        )
+        if hasattr(fecha, "date") and not isinstance(fecha, date):
+            try:
+                fecha = timezone.localtime(fecha).date()
+            except Exception:
+                fecha = fecha.date()
+
+    if moneda == "VES":
+        # Si no hay tasa_bcv almacenada (p. ej. pagos), intentar USD BCV por fecha.
+        if tasa_bcv is None and fecha is not None:
+            key = (fecha, "USD")
+            if key not in cache_tasas:
+                try:
+                    t = get_tasa_del_dia("VES", fecha, base="USD", auto_sync=False)
+                except Exception:
+                    t = None
+                cache_tasas[key] = to_decimal(t.tasa) if t is not None else None
+            ref_usd = cache_tasas[key]
+            if ref_usd is not None and abs(tasa_doc - ref_usd) <= tol:
+                return "Dólar BCV"
+
+        if fecha is not None:
+            for base, etiqueta in (("EUR", "Euro BCV"), ("USDT", "USDT")):
+                key = (fecha, base)
+                if key not in cache_tasas:
+                    try:
+                        t = get_tasa_del_dia("VES", fecha, base=base, auto_sync=False)
+                    except Exception:
+                        t = None
+                    cache_tasas[key] = to_decimal(t.tasa) if t is not None else None
+                ref = cache_tasas[key]
+                if ref is not None and abs(tasa_doc - ref) <= tol:
+                    return etiqueta
+        return "Ajuste"
+
+    return moneda or "Ajuste"
+
+
 def build_ventas(filtros: dict, user) -> dict:
-    qs = Pedido.objects.select_related("cliente").all()
+    qs = Pedido.objects.select_related("cliente").prefetch_related("deuda").all()
     estado = (filtros.get("estado") or "").strip()
     if estado:
         qs = qs.filter(estado=estado)
@@ -214,6 +286,7 @@ def build_ventas(filtros: dict, user) -> dict:
     descuento_base = Decimal("0.00")
     contado_base = Decimal("0.00")
     credito_base = Decimal("0.00")
+    cache_tasas: dict[tuple, Decimal | None] = {}
 
     for pedido in pedidos:
         base = _safe_base(pedido.total, pedido.tasa_cambio)
@@ -224,17 +297,37 @@ def build_ventas(filtros: dict, user) -> dict:
             credito_base += base
         else:
             contado_base += base
+        try:
+            deuda = pedido.deuda
+        except Exception:
+            deuda = None
+        if deuda is None:
+            estado_pago = "Sin deuda" if pedido.estado == Pedido.Estado.BORRADOR else "Pendiente"
+        else:
+            if deuda.estado == deuda.Estado.PAGADA or (
+                deuda.saldo is not None and Decimal(str(deuda.saldo)) <= Decimal("0.00")
+            ):
+                estado_pago = "Pagado"
+            elif deuda.estado == deuda.Estado.ANULADA:
+                estado_pago = "Anulado"
+            else:
+                estado_pago = "Pendiente"
         filas.append(
             {
                 "numero": pedido.numero,
+                "numero_referencia": pedido.numero_referencia or "—",
                 "fecha": pedido.fecha.isoformat() if pedido.fecha else "",
                 "cliente": pedido.cliente.nombre,
                 "estado": pedido.get_estado_display(),
                 "tipo_pago": pedido.get_tipo_pago_display(),
-                "moneda": pedido.moneda,
+                "numero_cuotas": _int(getattr(pedido, "numero_cuotas", 1) or 1),
+                "estado_pago": estado_pago,
+                "moneda": _etiqueta_moneda_calculo(pedido, cache_tasas),
+                "moneda_doc": str(pedido.moneda or "").upper(),
                 "tasa_cambio": _rate(pedido.tasa_cambio),
                 "subtotal": _money(pedido.subtotal),
                 "descuento": _money(pedido.descuento),
+                "otros_montos": _money(getattr(pedido, "otros_montos", 0) or 0),
                 "iva": _money(pedido.iva),
                 "total": _money(pedido.total),
                 "total_base": _money(base),
@@ -244,14 +337,18 @@ def build_ventas(filtros: dict, user) -> dict:
     ticket = total_base / len(pedidos) if pedidos else Decimal("0.00")
     columnas = [
         _col("numero", "Número"),
+        _col("numero_referencia", "Referencia"),
         _col("fecha", "Fecha", "date"),
         _col("cliente", "Cliente"),
         _col("estado", "Estado", "badge"),
         _col("tipo_pago", "Tipo de pago"),
-        _col("moneda", "Moneda", align="center"),
-        _col("tasa_cambio", "Tasa", "rate"),
+        _col("numero_cuotas", "Cuotas", "int"),
+        _col("estado_pago", "Pago", "badge"),
+        _col("moneda", "Tasa / moneda de cálculo", align="center"),
+        _col("tasa_cambio", "Tasa (Bs)", "rate"),
         _col("subtotal", "Subtotal", "money", "row"),
         _col("descuento", "Descuento", "money", "row"),
+        _col("otros_montos", "Otros montos", "money", "row"),
         _col("iva", "IVA", "money", "row"),
         _col("total", "Total", "money", "row"),
         _col("total_base", "Total base", "money", "base"),
@@ -268,7 +365,7 @@ def build_ventas(filtros: dict, user) -> dict:
     return _payload(
         slug="ventas",
         titulo="Reporte de ventas",
-        descripcion="Pedidos emitidos en el período, con totales consolidados en moneda base.",
+        descripcion="Pedidos emitidos en el período, con totales consolidados.",
         filtros=filtros,
         filtros_extra=[("Cliente", _nombre_cliente(filtros))],
         columnas=columnas,
@@ -284,7 +381,7 @@ def build_ventas(filtros: dict, user) -> dict:
 
 
 def build_cxc(filtros: dict, user) -> dict:
-    qs = Deuda.objects.select_related("cliente", "pedido").all()
+    qs = Deuda.objects.select_related("cliente", "pedido").prefetch_related("cuotas").all()
     estado = (filtros.get("estado") or "").strip()
     if estado:
         qs = qs.filter(estado=estado)
@@ -309,6 +406,8 @@ def build_cxc(filtros: dict, user) -> dict:
     original_base = Decimal("0.00")
     vencido_base = Decimal("0.00")
     vencidas = 0
+    cuotas_pendientes_total = 0
+    cuotas_vencidas_total = 0
     aging = {
         "corriente": Decimal("0.00"),
         "d1_30": Decimal("0.00"),
@@ -316,6 +415,7 @@ def build_cxc(filtros: dict, user) -> dict:
         "d61_90": Decimal("0.00"),
         "d90_mas": Decimal("0.00"),
     }
+    cache_tasas: dict[tuple, Decimal | None] = {}
 
     for deuda in deudas:
         base = _safe_base(deuda.saldo, deuda.tasa_cambio)
@@ -336,6 +436,19 @@ def build_cxc(filtros: dict, user) -> dict:
             aging["d61_90"] += base
         else:
             aging["d90_mas"] += base
+
+        cuotas = list(deuda.cuotas.all())
+        cuotas_total = len(cuotas)
+        cuotas_pagadas = sum(1 for c in cuotas if c.estado == Cuota.Estado.PAGADA or c.saldo <= 0)
+        cuotas_pendientes = sum(1 for c in cuotas if c.saldo > 0)
+        cuotas_vencidas = sum(
+            1
+            for c in cuotas
+            if c.saldo > 0 and c.fecha_vencimiento and hoy > c.fecha_vencimiento
+        )
+        cuotas_pendientes_total += cuotas_pendientes
+        cuotas_vencidas_total += cuotas_vencidas
+        proxima = next((c for c in cuotas if c.saldo > 0), None)
         filas.append(
             {
                 "pedido": deuda.pedido.numero,
@@ -345,7 +458,18 @@ def build_cxc(filtros: dict, user) -> dict:
                 "fecha_vencimiento": (
                     deuda.fecha_vencimiento.isoformat() if deuda.fecha_vencimiento else ""
                 ),
-                "moneda": deuda.moneda,
+                "proxima_cuota_fecha": (
+                    proxima.fecha_vencimiento.isoformat()
+                    if proxima and proxima.fecha_vencimiento
+                    else ""
+                ),
+                "proxima_cuota_monto": _money(proxima.saldo) if proxima else "",
+                "cuotas": cuotas_total,
+                "cuotas_pagadas": cuotas_pagadas,
+                "cuotas_pendientes": cuotas_pendientes,
+                "cuotas_vencidas": cuotas_vencidas,
+                "moneda": _etiqueta_moneda_calculo(deuda, cache_tasas),
+                "moneda_doc": str(deuda.moneda or "").upper(),
                 "monto_original": _money(deuda.monto_original),
                 "saldo": _money(deuda.saldo),
                 "saldo_base": _money(base),
@@ -360,7 +484,13 @@ def build_cxc(filtros: dict, user) -> dict:
         _col("codigo", "Código"),
         _col("fecha_emision", "Emisión", "date"),
         _col("fecha_vencimiento", "Vencimiento", "date"),
-        _col("moneda", "Moneda", align="center"),
+        _col("proxima_cuota_fecha", "Próx. cuota", "date"),
+        _col("proxima_cuota_monto", "Monto próx. cuota", "money", "row"),
+        _col("cuotas", "Cuotas", "int"),
+        _col("cuotas_pagadas", "Pagadas", "int"),
+        _col("cuotas_pendientes", "Pendientes", "int"),
+        _col("cuotas_vencidas", "Cuotas venc.", "int"),
+        _col("moneda", "Tasa / moneda de cálculo", align="center"),
         _col("monto_original", "Monto original", "money", "row"),
         _col("saldo", "Saldo", "money", "row"),
         _col("saldo_base", "Saldo base", "money", "base"),
@@ -373,6 +503,8 @@ def build_cxc(filtros: dict, user) -> dict:
         _resumen_item("Saldo pendiente", _money(saldo_base)),
         _resumen_item("Cuentas vencidas", vencidas, "int"),
         _resumen_item("Saldo vencido", _money(vencido_base)),
+        _resumen_item("Cuotas pendientes", cuotas_pendientes_total, "int"),
+        _resumen_item("Cuotas vencidas", cuotas_vencidas_total, "int"),
         _resumen_item("Corriente", _money(aging["corriente"])),
         _resumen_item("1 a 30 días", _money(aging["d1_30"])),
         _resumen_item("31 a 60 días", _money(aging["d31_60"])),
@@ -382,7 +514,7 @@ def build_cxc(filtros: dict, user) -> dict:
     return _payload(
         slug="cxc",
         titulo="Cuentas por cobrar",
-        descripcion="Cartera de clientes, antigüedad de saldos y montos vencidos.",
+        descripcion="Cartera de clientes, antigüedad de saldos y plan de cuotas.",
         filtros=filtros,
         filtros_extra=[("Cliente", _nombre_cliente(filtros))],
         columnas=columnas,
@@ -506,6 +638,7 @@ def build_utilidad(filtros: dict, user) -> dict:
     costo_base = Decimal("0.00")
     utilidad_base = Decimal("0.00")
     cantidad_total = Decimal("0.000")
+    cache_tasas: dict[tuple, Decimal | None] = {}
 
     for detalle in detalles:
         pedido = detalle.pedido
@@ -526,7 +659,8 @@ def build_utilidad(filtros: dict, user) -> dict:
                 "estado": pedido.get_estado_display(),
                 "descripcion": detalle.descripcion or "—",
                 "cantidad": _qty(detalle.cantidad),
-                "moneda": pedido.moneda,
+                "moneda": _etiqueta_moneda_calculo(pedido, cache_tasas),
+                "moneda_doc": str(pedido.moneda or "").upper(),
                 "precio_unitario": _money(detalle.precio_unitario),
                 "costo_unitario": _money(detalle.costo_unitario),
                 "venta": _money(venta),
@@ -545,7 +679,7 @@ def build_utilidad(filtros: dict, user) -> dict:
         _col("estado", "Estado", "badge"),
         _col("descripcion", "Descripción"),
         _col("cantidad", "Cantidad", "qty"),
-        _col("moneda", "Moneda", align="center"),
+        _col("moneda", "Tasa / moneda de cálculo", align="center"),
         _col("precio_unitario", "Precio unit.", "money", "row"),
         _col("costo_unitario", "Costo unit.", "money", "row"),
         _col("venta", "Venta", "money", "row"),
@@ -597,6 +731,7 @@ def build_compras(filtros: dict, user) -> dict:
     filas = []
     total_base = Decimal("0.00")
     iva_base = Decimal("0.00")
+    cache_tasas: dict[tuple, Decimal | None] = {}
 
     for compra in compras:
         base = _safe_base(compra.total, compra.tasa_cambio)
@@ -608,7 +743,8 @@ def build_compras(filtros: dict, user) -> dict:
                 "fecha": compra.fecha.isoformat() if compra.fecha else "",
                 "proveedor": compra.proveedor.nombre,
                 "estado": compra.get_estado_display(),
-                "moneda": compra.moneda,
+                "moneda": _etiqueta_moneda_calculo(compra, cache_tasas),
+                "moneda_doc": str(compra.moneda or "").upper(),
                 "tasa_cambio": _rate(compra.tasa_cambio),
                 "subtotal": _money(compra.subtotal),
                 "iva": _money(compra.iva),
@@ -622,8 +758,8 @@ def build_compras(filtros: dict, user) -> dict:
         _col("fecha", "Fecha", "date"),
         _col("proveedor", "Proveedor"),
         _col("estado", "Estado", "badge"),
-        _col("moneda", "Moneda", align="center"),
-        _col("tasa_cambio", "Tasa", "rate"),
+        _col("moneda", "Tasa / moneda de cálculo", align="center"),
+        _col("tasa_cambio", "Tasa (Bs)", "rate"),
         _col("subtotal", "Subtotal", "money", "row"),
         _col("iva", "IVA", "money", "row"),
         _col("total", "Total", "money", "row"),
@@ -637,7 +773,7 @@ def build_compras(filtros: dict, user) -> dict:
     return _payload(
         slug="compras",
         titulo="Reporte de compras",
-        descripcion="Compras a proveedores y su equivalente en moneda base.",
+        descripcion="Compras a proveedores registradas en el período.",
         filtros=filtros,
         filtros_extra=[("Proveedor", _nombre_proveedor(filtros))],
         columnas=columnas,
@@ -653,7 +789,9 @@ def build_compras(filtros: dict, user) -> dict:
 
 
 def build_cobranza(filtros: dict, user) -> dict:
-    qs = Pago.objects.select_related("cliente").all()
+    qs = Pago.objects.select_related("cliente").prefetch_related(
+        "aplicaciones__deuda", "aplicaciones__cuota"
+    )
     if not filtros.get("incluir_anulados"):
         qs = qs.filter(anulado=False)
     qs = _aplicar_rango(qs, "fecha_pago", filtros)
@@ -668,12 +806,32 @@ def build_cobranza(filtros: dict, user) -> dict:
     filas = []
     total_base = Decimal("0.00")
     por_metodo: dict[str, Decimal] = {}
+    cache_tasas: dict[tuple, Decimal | None] = {}
 
     for pago in pagos:
         base = money(pago.monto_base)
         total_base += base
         metodo_label = pago.get_metodo_display()
         por_metodo[metodo_label] = por_metodo.get(metodo_label, Decimal("0.00")) + base
+        aplicaciones = list(pago.aplicaciones.all())
+        deudas = [a.deuda for a in aplicaciones if getattr(a, "deuda_id", None)]
+        cuotas_nums = sorted(
+            {
+                str(a.cuota.numero)
+                for a in aplicaciones
+                if getattr(a, "cuota_id", None) and getattr(a, "cuota", None)
+            },
+            key=lambda x: int(x),
+        )
+        if not deudas:
+            estado_deuda = "Sin aplicar"
+        else:
+            todos_pagados = all(
+                (d.estado == "pagada")
+                or (d.saldo is not None and Decimal(str(d.saldo)) <= Decimal("0.00"))
+                for d in deudas
+            )
+            estado_deuda = "Deudas pagadas" if todos_pagados else "Deudas pendientes"
         filas.append(
             {
                 "numero": pago.numero,
@@ -682,11 +840,20 @@ def build_cobranza(filtros: dict, user) -> dict:
                 "metodo": metodo_label,
                 "referencia": pago.referencia or "—",
                 "banco": pago.banco or "—",
-                "moneda": pago.moneda,
+                "telefono_origen": getattr(pago, "telefono_origen", "") or "—",
+                "cuotas_aplicadas": ", ".join(cuotas_nums) if cuotas_nums else "—",
+                "moneda": _etiqueta_moneda_calculo(pago, cache_tasas),
+                "moneda_doc": str(pago.moneda or "").upper(),
                 "tasa_cambio": _rate(pago.tasa_cambio),
                 "monto": _money(pago.monto),
+                "monto_bs": (
+                    _money(pago.monto_recibido_bs)
+                    if getattr(pago, "monto_recibido_bs", None) is not None
+                    else ""
+                ),
                 "monto_base": _money(base),
                 "estado": "Anulado" if pago.anulado else "Aplicado",
+                "estado_deuda": estado_deuda,
             }
         )
 
@@ -706,16 +873,20 @@ def build_cobranza(filtros: dict, user) -> dict:
         _col("metodo", "Método"),
         _col("referencia", "Referencia"),
         _col("banco", "Banco"),
-        _col("moneda", "Moneda", align="center"),
-        _col("tasa_cambio", "Tasa", "rate"),
+        _col("telefono_origen", "Teléfono origen"),
+        _col("cuotas_aplicadas", "Cuotas"),
+        _col("moneda", "Tasa / moneda de cálculo", align="center"),
+        _col("tasa_cambio", "Tasa (Bs)", "rate"),
         _col("monto", "Monto", "money", "row"),
+        _col("monto_bs", "Monto recibido (Bs)", "money", "VES"),
         _col("monto_base", "Monto base", "money", "base"),
         _col("estado", "Estado", "badge"),
+        _col("estado_deuda", "Estado de deuda", "badge"),
     ]
     return _payload(
         slug="cobranza",
         titulo="Reporte de cobranza",
-        descripcion="Pagos recibidos y su consolidación en moneda base.",
+        descripcion="Pagos recibidos en el período y su aplicación a cuotas/deudas.",
         filtros=filtros,
         filtros_extra=[("Cliente", _nombre_cliente(filtros))],
         columnas=columnas,
@@ -772,7 +943,8 @@ def build_caja(filtros: dict, user) -> dict:
                 ),
                 "usuario": sesion.usuario_apertura.nombre,
                 "estado": sesion.get_estado_display(),
-                "moneda": sesion.moneda,
+                "moneda": str(sesion.moneda or "").upper(),
+                "moneda_doc": str(sesion.moneda or "").upper(),
                 "monto_inicial": _money(sesion.monto_inicial),
                 "ingresos": _money(ingresos),
                 "egresos": _money(egresos),
@@ -937,7 +1109,7 @@ REPORTES: dict[str, ReporteDef] = {
     "ventas": ReporteDef(
         "ventas",
         "Reporte de ventas",
-        "Pedidos emitidos y totales consolidados en moneda base.",
+        "Pedidos emitidos y totales consolidados.",
         ("admin", "vendedor"),
         build_ventas,
     ),
@@ -965,14 +1137,14 @@ REPORTES: dict[str, ReporteDef] = {
     "compras": ReporteDef(
         "compras",
         "Reporte de compras",
-        "Compras a proveedores y su equivalente en moneda base.",
+        "Compras a proveedores registradas en el período.",
         ("admin", "almacenista"),
         build_compras,
     ),
     "cobranza": ReporteDef(
         "cobranza",
         "Reporte de cobranza",
-        "Pagos recibidos y su consolidación en moneda base.",
+        "Pagos recibidos en el período.",
         ("admin", "cobrador"),
         build_cobranza,
     ),

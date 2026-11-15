@@ -1,65 +1,98 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Alert } from "../../../components/ui/Alert";
 import { Button } from "../../../components/ui/Button";
 import { Input } from "../../../components/ui/Input";
 import { Modal } from "../../../components/ui/Modal";
 import { Select } from "../../../components/ui/Select";
 import { TextArea } from "../../../components/ui/TextArea";
-import { api } from "../../../lib/api";
-import { toDisplayDecimal } from "../../../lib/decimal";
+import { BANCOS_VE } from "../../../lib/banks-ve";
+import { formatInputDecimal } from "../../../lib/decimal";
 import { getErrorMessage } from "../../../lib/errors";
 import { formatMoney } from "../../../lib/money";
-import { EnviarMensajePrueba } from "../../whatsapp/components/EnviarMensajePrueba";
 import { useRegistrarPago } from "../hooks";
+
+function parseDecimalInput(v) {
+  if (v === null || v === undefined || v === "") return 0;
+  let s = String(v).trim();
+  if (s.includes(",")) s = s.replace(/\./g, "").replace(",", ".");
+  const n = Number(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function calcularPagoEnMoneda(deuda, monedaDestino) {
+  const saldoDeuda = parseDecimalInput(deuda.proxima_cuota?.saldo ?? deuda.saldo ?? "0");
+  const monedaDeuda = String(deuda.moneda || "USD").toUpper();
+  const tasaDeuda = parseDecimalInput(deuda.tasa_cambio || "1"); // registrada en el registro (ej. Bs por 1 monedaDeuda)
+  const tasaBcv = parseDecimalInput(deuda.tasa_bcv || "0"); // Bs por 1 USD registrada
+  const dest = String(monedaDestino || monedaDeuda).toUpperCase();
+
+  if (dest === monedaDeuda) {
+    return { monto: saldoDeuda, tasa: tasaDeuda };
+  }
+  if (dest === "VES") {
+    // deuda en divisa con tasa registrada en Bs por 1 unidad de deuda.moneda
+    return { monto: saldoDeuda * tasaDeuda, tasa: tasaDeuda };
+  }
+  if (monedaDeuda === "VES") {
+    if (dest === "USD" && tasaBcv > 0) {
+      return { monto: saldoDeuda / tasaBcv, tasa: tasaBcv };
+    }
+    return { monto: saldoDeuda, tasa: 1 };
+  }
+  // Conversión entre divisas usando tasas registradas en el documento (Bs por unidad)
+  const totalVes = saldoDeuda * tasaDeuda;
+  if (dest === "USD" && tasaBcv > 0) {
+    return { monto: totalVes / tasaBcv, tasa: tasaBcv };
+  }
+  // Sin tasa registrada para la divisa destino: mantener equivalente en VES como referencia
+  return { monto: totalVes, tasa: 1 };
+}
 
 export function RegistrarPagoModal({ deuda, onClose }) {
   const mutation = useRegistrarPago();
   const [error, setError] = useState(null);
-  const [tasaVigenteBs, setTasaVigenteBs] = useState(null);
 
+  const saldoInicial = deuda.proxima_cuota?.saldo ?? deuda.saldo ?? "";
   const [fechaPago, setFechaPago] = useState(() => new Date().toISOString().slice(0, 10));
   const [metodo, setMetodo] = useState("pago_movil");
   const [referencia, setReferencia] = useState("");
   const [banco, setBanco] = useState("");
-  const [telefonoOrigen, setTelefonoOrigen] = useState("");
-  const [monto, setMonto] = useState(() => String(deuda.proxima_cuota?.saldo ?? deuda.saldo ?? ""));
-  const [moneda, setMoneda] = useState(deuda.moneda || "USD");
-  const [tasaCambio, setTasaCambio] = useState(String(deuda.tasa_cambio || "1"));
-  const [montoRecibidoBs, setMontoRecibidoBs] = useState("");
-  const [tasaUsadaBs, setTasaUsadaBs] = useState("");
+  const [telefonoOrigen, setTelefonoOrigen] = useState(deuda.cliente_telefono || "");
+  const [monto, setMonto] = useState(() => formatInputDecimal(String(saldoInicial), 2));
+  const [moneda, setMoneda] = useState(() => String(deuda.moneda || "USD").toUpperCase());
+  const [tasaCambio, setTasaCambio] = useState(() => formatInputDecimal(String(deuda.tasa_cambio || "1"), 2));
   const [nota, setNota] = useState("");
 
+  function onChangeMoneda(e) {
+    const nueva = String(e.target.value || "").toUpperCase();
+    setMoneda(nueva);
+    const calc = calcularPagoEnMoneda(deuda, nueva);
+    setMonto(formatInputDecimal(String(calc.monto || 0), 2));
+    setTasaCambio(formatInputDecimal(String(calc.tasa || 1), 2));
+  }
+
+  // (eliminado fetch de tasa vigente Bs/USD y campos relacionados)
+
   useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const { data } = await api.get("/tasas-cambio/vigente/", { params: { moneda: "VES", base: "USD" } });
-        if (alive && data?.tasa) {
-          setTasaVigenteBs(String(data.tasa));
-          setTasaUsadaBs(String(data.tasa));
-        }
-      } catch {}
-    })();
-    return () => { alive = false; };
-  }, []);
-
-  const esperadoBs = useMemo(() => {
-    const m = parseFloat(monto || "0");
-    const t = parseFloat(tasaUsadaBs || "0");
-    if (!m || !t) return null;
-    if (moneda === "USD") return m * t;
-    if (moneda === "VES") return m;
-    return null;
-  }, [monto, tasaUsadaBs, moneda]);
-
-  const diferenciaBs = useMemo(() => {
-    if (esperadoBs == null || !montoRecibidoBs) return null;
-    return parseFloat(montoRecibidoBs) - esperadoBs;
-  }, [esperadoBs, montoRecibidoBs]);
+    if (metodo === "efectivo") {
+      setBanco("");
+      setReferencia("");
+    } else if (metodo === "zelle") {
+      setBanco("");
+    }
+  }, [metodo]);
 
   async function onSubmit(e) {
     e.preventDefault();
     setError(null);
+    const normDec = (v) => {
+      if (v === null || v === undefined || v === "") return v;
+      let s = String(v).trim();
+      if (s.includes(",")) {
+        s = s.replace(/\./g, "").replace(",", ".");
+      }
+      return s;
+    };
     try {
       await mutation.mutateAsync({
         deuda_id: deuda.id,
@@ -68,11 +101,9 @@ export function RegistrarPagoModal({ deuda, onClose }) {
         referencia,
         banco,
         telefono_origen: telefonoOrigen,
-        monto,
+        monto: normDec(monto),
         moneda,
-        tasa_cambio: tasaCambio,
-        monto_recibido_bs: montoRecibidoBs || null,
-        tasa_usada_bs: tasaUsadaBs || null,
+        tasa_cambio: normDec(tasaCambio),
         nota,
       });
       onClose();
@@ -96,7 +127,9 @@ export function RegistrarPagoModal({ deuda, onClose }) {
     >
       <form id="form-registro-pago" onSubmit={onSubmit} className="space-y-4 text-sm">
         {error ? <Alert tone="error">{error}</Alert> : null}
-        <Alert tone="info">El pago se aplica automáticamente a la(s) cuota(s) pendiente(s) más antigua(s). Si es en efectivo, requiere una sesión de caja abierta.</Alert>
+        <Alert tone="info">
+          El pago se aplica automáticamente a la(s) cuota(s) pendiente(s) más antigua(s). Si cambias la moneda de pago, el monto y la tasa se recalculan usando la tasa registrada en el documento. Si es en efectivo, requiere una sesión de caja abierta.
+        </Alert>
 
         <div className="grid gap-3 sm:grid-cols-2">
           <Input label="Fecha de pago" type="date" required value={fechaPago} onChange={(e) => setFechaPago(e.target.value)} />
@@ -107,40 +140,52 @@ export function RegistrarPagoModal({ deuda, onClose }) {
             <option value="zelle">Zelle</option>
             <option value="otro">Otro</option>
           </Select>
-          <Input label="Banco" value={banco} onChange={(e) => setBanco(e.target.value)} />
-          <Input label="Referencia / Nº operación" value={referencia} onChange={(e) => setReferencia(e.target.value)} />
-          <Input label="Teléfono de origen (transferencia/pago móvil)" value={telefonoOrigen} onChange={(e) => setTelefonoOrigen(e.target.value)} placeholder="584141234567" />
-          <Input label={`Monto (${moneda})`} type="text" inputMode="decimal" required value={monto} onChange={(e) => setMonto(e.target.value)} />
-          <Select label="Moneda" value={moneda} onChange={(e) => setMoneda(e.target.value)}>
-            <option value="USD">USD</option>
+          <Input
+            label="Teléfono del cliente (origen)"
+            value={telefonoOrigen}
+            onChange={(e) => setTelefonoOrigen(e.target.value)}
+            placeholder="584141234567"
+          />
+          {["pago_movil", "transferencia", "otro"].includes(metodo) ? (
+            <Select
+              label="Banco (importante)"
+              value={banco}
+              onChange={(e) => setBanco(e.target.value)}
+            >
+              <option value="">Selecciona banco...</option>
+              {BANCOS_VE.map((b) => (
+                <option key={b.value} value={b.value}>
+                  {b.label}
+                </option>
+              ))}
+            </Select>
+          ) : null}
+          {metodo !== "efectivo" ? (
+            <Input
+              label={metodo === "zelle" ? "Referencia / Código de confirmación (Zelle)" : "Referencia / Nº operación"}
+              value={referencia}
+              onChange={(e) => setReferencia(e.target.value)}
+            />
+          ) : null}
+          <Input label={`Monto (${moneda})`} type="text" inputMode="decimal" required value={monto} onChange={(e) => setMonto(e.target.value)} onBlur={() => setMonto((v) => formatInputDecimal(v || "0", 2))} />
+          <Select label="Moneda de pago" value={moneda} onChange={onChangeMoneda}>
             <option value="VES">VES</option>
+            <option value="USD">USD</option>
             <option value="EUR">EUR</option>
             <option value="USDT">USDT</option>
           </Select>
-          <Input label="Tasa de cambio (del pago)" type="text" inputMode="decimal" value={tasaCambio} onChange={(e) => setTasaCambio(e.target.value)} />
-          <Input label="Tasa Bs/USD usada" type="text" inputMode="decimal" value={tasaUsadaBs} onChange={(e) => setTasaUsadaBs(e.target.value)} placeholder={tasaVigenteBs || "tasa BCV"} />
-          <Input label="Monto recibido en Bs" type="text" inputMode="decimal" value={montoRecibidoBs} onChange={(e) => setMontoRecibidoBs(e.target.value)} />
-        </div>
-
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 space-y-1">
-          <p>Tasa Bs vigente ref.: {tasaVigenteBs ? toDisplayDecimal(tasaVigenteBs, 2) : "no disponible"}</p>
-          <p>Esperado en Bs (según monto y tasa usada): {esperadoBs != null ? `Bs ${toDisplayDecimal(String(esperadoBs), 2)}` : "—"}</p>
-          {diferenciaBs != null ? (
-            <p className={diferenciaBs < -0.05 ? "text-rose-700 font-medium" : "text-emerald-700"}>
-              Diferencia: Bs {toDisplayDecimal(String(diferenciaBs), 2)} {diferenciaBs < -0.05 ? "(incompleto: se rechazará si es menor al esperado)" : "(ok/sobrante)"}
-            </p>
-          ) : null}
+          <Input
+            label="Tasa de cambio (registrada del pedido)"
+            type="text"
+            inputMode="decimal"
+            value={tasaCambio}
+            readOnly
+            title="Tasa tomada del registro del documento/deuda"
+          />
         </div>
 
         <TextArea label="Nota" value={nota} onChange={(e) => setNota(e.target.value)} rows={2} />
       </form>
-
-      <div className="mt-6 border-t border-slate-200 pt-4">
-        <EnviarMensajePrueba
-          initialTo={deuda.cliente_telefono || ""}
-          initialMessage={`Cliente: ${deuda.cliente_nombre}\nPedido: ${deuda.pedido_numero}\nMonto: ${formatMoney(deuda.saldo, deuda.moneda)}`}
-        />
-      </div>
     </Modal>
   );
 }

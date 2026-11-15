@@ -29,6 +29,8 @@ from .serializers import (
     AdminUserSerializer,
     ChangePasswordSerializer,
     LoginSerializer,
+    PasswordResetConfirmSerializer,
+    PasswordResetRequestSerializer,
     ProfileUpdateSerializer,
     UserSerializer,
 )
@@ -177,6 +179,52 @@ class ChangePasswordView(APIView):
             path=settings.REFRESH_COOKIE_PATH,
         )
         return response
+
+
+class PasswordResetRequestView(APIView):
+    """Solicita el envío de un enlace de recuperación de contraseña."""
+
+    permission_classes = (AllowAny,)
+    throttle_classes = (ScopedRateThrottle,)
+    throttle_scope = "login"
+
+    @extend_schema(request=PasswordResetRequestSerializer, responses={200: OpenApiTypes.OBJECT})
+    def post(self, request):
+        serializer = PasswordResetRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            serializer.save()
+        except Exception:
+            # No revelar errores de envío/configuración; se responde genéricamente.
+            pass
+        return Response(
+            {
+                "detail": (
+                    "Si el correo está registrado, recibirás un enlace para "
+                    "restablecer tu contraseña."
+                )
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class PasswordResetConfirmView(APIView):
+    """Restablece la contraseña usando el token enviado por correo."""
+
+    permission_classes = (AllowAny,)
+
+    @extend_schema(request=PasswordResetConfirmSerializer, responses={200: OpenApiTypes.OBJECT})
+    def post(self, request):
+        serializer = PasswordResetConfirmSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        with transaction.atomic():
+            user = serializer.save()
+            for token in OutstandingToken.objects.filter(user=user):
+                BlacklistedToken.objects.get_or_create(token=token)
+        return Response(
+            {"detail": "Contraseña restablecida correctamente. Ya puedes iniciar sesión."},
+            status=status.HTTP_200_OK,
+        )
 
 
 class AdminUserViewSet(viewsets.ModelViewSet):

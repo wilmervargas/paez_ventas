@@ -26,6 +26,8 @@ CAMPOS_PEDIDO = (
     "tasa_cambio",
     "tipo_pago",
     "numero_cuotas",
+    "fecha_primera_cuota",
+    "plan_cuotas",
     "descuento",
     "otros_montos",
     "numero_referencia",
@@ -33,6 +35,120 @@ CAMPOS_PEDIDO = (
 )
 
 TWO_PLACES = Decimal("0.01")
+
+
+def _parse_fecha_cuota(valor):
+    if valor in (None, ""):
+        return None
+    if hasattr(valor, "year") and hasattr(valor, "month") and hasattr(valor, "day"):
+        return valor
+    from datetime import date
+
+    try:
+        return date.fromisoformat(str(valor))
+    except Exception as exc:
+        raise BusinessRuleError("La fecha de la cuota no es válida.") from exc
+
+
+def _normalizar_plan_cuotas(
+    tipo_pago: str,
+    numero_cuotas,
+    fecha_primera_cuota,
+    plan_cuotas,
+    total: Decimal,
+    fecha_pedido,
+) -> tuple[int, object, list[dict]]:
+    """Normaliza el plan de cuotas para pedidos a crédito.
+
+    - Semanal desde la fecha de la primera cuota (si no se indican fechas por cuota).
+    - Montos en moneda del pedido/documento.
+    - Ajuste automático del residuo en la última cuota para cuadrar con el total.
+    """
+    if tipo_pago != Pedido.TipoPago.CREDITO:
+        return 1, None, []
+
+    try:
+        n = int(numero_cuotas or 1)
+    except (TypeError, ValueError):
+        n = 1
+    n = max(1, min(8, n))
+
+    total = money(total)
+    fecha_base = _parse_fecha_cuota(fecha_primera_cuota) or fecha_pedido
+
+    entradas = plan_cuotas if isinstance(plan_cuotas, list) else []
+    if entradas and len(entradas) != n:
+        # Si el usuario cambió la cantidad, regeneramos base y conservamos montos/fechas donde aplique.
+        pass
+
+    montos = []
+    fechas = []
+    for i in range(n):
+        entrada = entradas[i] if i < len(entradas) else {}
+        monto_raw = entrada.get("monto") if isinstance(entrada, dict) else None
+        fecha_raw = entrada.get("fecha_vencimiento") if isinstance(entrada, dict) else None
+        if monto_raw in (None, ""):
+            montos.append(None)
+        else:
+            montos.append(money(monto_raw))
+        fecha = _parse_fecha_cuota(fecha_raw) if fecha_raw not in (None, "") else None
+        if fecha is None:
+            from datetime import timedelta
+
+            fecha = fecha_base + timedelta(days=7 * i)
+        fechas.append(fecha)
+
+    base = (to_decimal(total) / Decimal(n)).quantize(TWO_PLACES, rounding=ROUND_HALF_UP)
+    normalizados = []
+    acumulado = Decimal("0.00")
+    for i in range(n):
+        if i == n - 1:
+            monto = money(to_decimal(total) - acumulado)
+        else:
+            monto = montos[i] if montos[i] is not None else base
+            if monto < 0:
+                monto = Decimal("0.00")
+            # Ajuste automático para no exceder el total disponible.
+            restante_despues = money(to_decimal(total) - acumulado - monto)
+            minimo_restante = Decimal("0.00")
+            if restante_despues < minimo_restante and n - i - 1 > 0:
+                monto = money(to_decimal(total) - acumulado)
+            acumulado = money(acumulado + monto)
+        if i == n - 1:
+            acumulado = money(acumulado + monto)
+        normalizados.append(
+            {
+                "numero": i + 1,
+                "fecha_vencimiento": fechas[i].isoformat(),
+                "monto": str(money(monto)),
+            }
+        )
+
+    # Ajuste automático final por redondeos/ediciones.
+    suma = sum((money(item["monto"]) for item in normalizados), Decimal("0.00"))
+    diff = money(total - suma)
+    if diff != Decimal("0.00") and normalizados:
+        ultimo = money(money(normalizados[-1]["monto"]) + diff)
+        if ultimo < 0:
+            # Redistribuir si el último quedara negativo por sobreajuste manual.
+            exceso = money(-ultimo)
+            normalizados[-1]["monto"] = "0.00"
+            for j in range(len(normalizados) - 2, -1, -1):
+                if exceso <= 0:
+                    break
+                actual = money(normalizados[j]["monto"])
+                rebaja = actual if actual <= exceso else exceso
+                normalizados[j]["monto"] = str(money(actual - rebaja))
+                exceso = money(exceso - rebaja)
+            suma = sum((money(item["monto"]) for item in normalizados), Decimal("0.00"))
+            diff = money(total - suma)
+            if diff != Decimal("0.00"):
+                idx = max(range(len(normalizados)), key=lambda k: money(normalizados[k]["monto"]))
+                normalizados[idx]["monto"] = str(money(money(normalizados[idx]["monto"]) + diff))
+        else:
+            normalizados[-1]["monto"] = str(ultimo)
+
+    return n, fecha_base, normalizados
 
 
 def _validar_modelo(instance) -> None:
@@ -198,15 +314,6 @@ def crear_pedido(data: dict, detalles: list[dict], user=None) -> Pedido:
         datos["numero_referencia"] = str(datos["numero_referencia"]).strip()
 
     tipo_pago = datos.get("tipo_pago") or Pedido.TipoPago.CONTADO
-    try:
-        numero_cuotas = int(datos.get("numero_cuotas") or 1)
-    except (TypeError, ValueError):
-        numero_cuotas = 1
-    if tipo_pago == Pedido.TipoPago.CONTADO:
-        numero_cuotas = 1
-    numero_cuotas = max(1, min(8, numero_cuotas))
-    datos["tipo_pago"] = tipo_pago
-    datos["numero_cuotas"] = numero_cuotas
 
     descuento_global = money(to_decimal(datos.get("descuento", 0)))
     if descuento_global < 0:
@@ -229,6 +336,24 @@ def crear_pedido(data: dict, detalles: list[dict], user=None) -> Pedido:
     total = money(subtotal + iva_total + otros_montos - descuento_global)
     if total < 0:
         total = Decimal("0.00")
+
+    if tipo_pago == Pedido.TipoPago.CONTADO:
+        numero_cuotas = 1
+        fecha_primera_cuota = None
+        plan_cuotas = []
+    else:
+        numero_cuotas, fecha_primera_cuota, plan_cuotas = _normalizar_plan_cuotas(
+            tipo_pago,
+            datos.get("numero_cuotas"),
+            datos.get("fecha_primera_cuota"),
+            datos.get("plan_cuotas"),
+            total,
+            fecha,
+        )
+    datos["tipo_pago"] = tipo_pago
+    datos["numero_cuotas"] = numero_cuotas
+    datos["fecha_primera_cuota"] = fecha_primera_cuota
+    datos["plan_cuotas"] = plan_cuotas
 
     # Congela la tasa BCV (Bs por 1 USD) vigente en la fecha del documento.
     tasa_bcv = get_tasa_del_dia("VES", fecha, base="USD")
@@ -290,6 +415,99 @@ def crear_pedido(data: dict, detalles: list[dict], user=None) -> Pedido:
     return pedido
 
 
+def _sincronizar_deuda_contado_borrador(pedido: Pedido, deuda: Deuda, user=None) -> Deuda:
+    """Actualiza la deuda de un pedido contado en borrador para que refleje el pedido.
+
+    Solo sincroniza si no hay pagos aplicados (ni anulados con efecto neto distinto de
+    cero). Si la deuda ya tiene aplicaciones vigentes, no se altera: el monto cobrado
+    debe seguir siendo consistente con lo registrado.
+    """
+    from apps.finances.models import PagoAplicacion
+    from apps.finances.services import crear_plan_cuotas
+
+    deuda = Deuda.objects.select_for_update().get(pk=deuda.pk)
+    if deuda.estado == Deuda.Estado.ANULADA:
+        return deuda
+
+    tiene_aplicaciones = PagoAplicacion.objects.filter(deuda=deuda, pago__anulado=False).exists()
+    if tiene_aplicaciones or deuda.saldo != deuda.monto_original:
+        if (
+            deuda.moneda != (pedido.moneda or deuda.moneda)
+            or money(deuda.monto_original) != money(pedido.total)
+            or to_decimal(deuda.tasa_cambio) != to_decimal(pedido.tasa_cambio)
+        ):
+            logger.warning(
+                "Pedidos: deuda %s del pedido contado %s difiere del pedido pero tiene pagos/aplicaciones; no se sincroniza.",
+                deuda.id,
+                pedido.numero,
+            )
+        return deuda
+
+    moneda = pedido.moneda or deuda.moneda
+    tasa = pedido.tasa_cambio or Decimal("1.000000")
+    total = money(pedido.total)
+    campos_update = []
+    if deuda.cliente_id != pedido.cliente_id:
+        deuda.cliente = pedido.cliente
+        campos_update.append("cliente")
+    if deuda.moneda != moneda:
+        deuda.moneda = moneda
+        campos_update.append("moneda")
+    if to_decimal(deuda.tasa_cambio) != to_decimal(tasa):
+        deuda.tasa_cambio = tasa
+        campos_update.append("tasa_cambio")
+    if money(deuda.monto_original) != total:
+        deuda.monto_original = total
+        campos_update.append("monto_original")
+    if money(deuda.saldo) != total:
+        deuda.saldo = total
+        campos_update.append("saldo")
+    if deuda.tasa_bcv != pedido.tasa_bcv:
+        deuda.tasa_bcv = pedido.tasa_bcv
+        campos_update.append("tasa_bcv")
+    if deuda.tasa_bcv_vigente_desde != pedido.tasa_bcv_vigente_desde:
+        deuda.tasa_bcv_vigente_desde = pedido.tasa_bcv_vigente_desde
+        campos_update.append("tasa_bcv_vigente_desde")
+    if deuda.fecha_emision != pedido.fecha:
+        deuda.fecha_emision = pedido.fecha
+        campos_update.append("fecha_emision")
+    if deuda.fecha_vencimiento is not None:
+        deuda.fecha_vencimiento = None
+        campos_update.append("fecha_vencimiento")
+    if deuda.estado != Deuda.Estado.PENDIENTE:
+        deuda.estado = Deuda.Estado.PENDIENTE
+        campos_update.append("estado")
+    if campos_update:
+        deuda.save(update_fields=[*campos_update, "updated_at"])
+
+    cuota = deuda.cuotas.order_by("numero").first()
+    fecha_cuota = pedido.fecha + timezone.timedelta(days=30)
+    if cuota is None:
+        crear_plan_cuotas(deuda, numero_cuotas=1, fecha_base=pedido.fecha, user=user)
+    else:
+        cuota_campos = []
+        if money(cuota.monto) != total:
+            cuota.monto = total
+            cuota_campos.append("monto")
+        if money(cuota.saldo) != total:
+            cuota.saldo = total
+            cuota_campos.append("saldo")
+        if cuota.fecha_vencimiento != fecha_cuota:
+            cuota.fecha_vencimiento = fecha_cuota
+            cuota_campos.append("fecha_vencimiento")
+        if cuota.estado != cuota.__class__.Estado.PENDIENTE:
+            cuota.estado = cuota.__class__.Estado.PENDIENTE
+            cuota_campos.append("estado")
+        if cuota_campos:
+            cuota.save(update_fields=[*cuota_campos, "updated_at"])
+        if deuda.fecha_vencimiento != cuota.fecha_vencimiento:
+            deuda.fecha_vencimiento = cuota.fecha_vencimiento
+            deuda.save(update_fields=["fecha_vencimiento", "updated_at"])
+
+    deuda.refresh_from_db()
+    return deuda
+
+
 @transaction.atomic
 def actualizar_pedido(pedido: Pedido, data: dict, detalles: list[dict] | None, user=None) -> Pedido:
     """Actualiza un pedido en borrador. Un pedido confirmado no se edita."""
@@ -314,15 +532,6 @@ def actualizar_pedido(pedido: Pedido, data: dict, detalles: list[dict] | None, u
         datos["numero_referencia"] = str(datos["numero_referencia"]).strip()
 
     tipo_pago = datos.get("tipo_pago") or pedido.tipo_pago
-    try:
-        numero_cuotas = int(datos.get("numero_cuotas", pedido.numero_cuotas) or 1)
-    except (TypeError, ValueError):
-        numero_cuotas = pedido.numero_cuotas or 1
-    if tipo_pago == Pedido.TipoPago.CONTADO:
-        numero_cuotas = 1
-    numero_cuotas = max(1, min(8, numero_cuotas))
-    datos["tipo_pago"] = tipo_pago
-    datos["numero_cuotas"] = numero_cuotas
 
     if detalles is None:
         detalles = [
@@ -364,6 +573,30 @@ def actualizar_pedido(pedido: Pedido, data: dict, detalles: list[dict] | None, u
     if total < 0:
         total = Decimal("0.00")
 
+    if tipo_pago == Pedido.TipoPago.CONTADO:
+        numero_cuotas = 1
+        fecha_primera_cuota = None
+        plan_cuotas = []
+    else:
+        plan_fuente = datos["plan_cuotas"] if "plan_cuotas" in datos else (pedido.plan_cuotas or [])
+        fecha_primera_fuente = (
+            datos["fecha_primera_cuota"]
+            if "fecha_primera_cuota" in datos
+            else pedido.fecha_primera_cuota
+        )
+        numero_cuotas, fecha_primera_cuota, plan_cuotas = _normalizar_plan_cuotas(
+            tipo_pago,
+            datos.get("numero_cuotas", pedido.numero_cuotas),
+            fecha_primera_fuente,
+            plan_fuente,
+            total,
+            fecha,
+        )
+    datos["tipo_pago"] = tipo_pago
+    datos["numero_cuotas"] = numero_cuotas
+    datos["fecha_primera_cuota"] = fecha_primera_cuota
+    datos["plan_cuotas"] = plan_cuotas
+
     for campo, valor in datos.items():
         setattr(pedido, campo, valor)
     tasa_bcv = get_tasa_del_dia("VES", fecha, base="USD")
@@ -404,15 +637,85 @@ def actualizar_pedido(pedido: Pedido, data: dict, detalles: list[dict] | None, u
         ]
     )
 
+    if pedido.tipo_pago == Pedido.TipoPago.CONTADO:
+        try:
+            deuda = Deuda.objects.select_for_update().get(pedido=pedido)
+        except Deuda.DoesNotExist:
+            deuda = None
+        if deuda is not None:
+            _sincronizar_deuda_contado_borrador(pedido, deuda, user=user)
+    elif hasattr(pedido, "deuda"):
+        # Si cambió a crédito u otro estado incompatible con deuda de contado borrador,
+        # no se elimina automáticamente; la confirmación/cobro debe manejarse explícitamente.
+        pass
+
     logger.info("Pedidos: %s actualizado por %s", pedido.numero, getattr(user, "email", "sistema"))
     return pedido
 
 
 @transaction.atomic
+def asegurar_deuda_contado_borrador(pedido: Pedido, user=None) -> Deuda:
+    """Crea (si no existe) la deuda para un pedido de contado en borrador (flujo 2b).
+
+    Si la deuda ya existe y no tiene pagos aplicados, se sincroniza con los datos
+    actuales del pedido para evitar que el modal de cobro muestre montos/moneda/tasa
+    desactualizados.
+    """
+    pedido = Pedido.objects.select_for_update().get(pk=pedido.pk)
+    if pedido.estado != Pedido.Estado.BORRADOR:
+        raise BusinessRuleError("Solo se puede preparar el cobro de pedidos en borrador.")
+    if pedido.tipo_pago != Pedido.TipoPago.CONTADO:
+        raise BusinessRuleError("Este pedido no es de contado.")
+    try:
+        deuda = pedido.deuda
+    except Deuda.DoesNotExist:
+        deuda = None
+    if deuda is not None:
+        return _sincronizar_deuda_contado_borrador(pedido, deuda, user=user)
+
+    empresa = get_empresa()
+    if empresa is None:
+        raise BusinessRuleError("Primero configura los datos fiscales de la empresa.")
+    moneda = pedido.moneda or empresa.moneda_base
+    tasa = pedido.tasa_cambio or Decimal("1.000000")
+    deuda = Deuda(
+        cliente=pedido.cliente,
+        pedido=pedido,
+        moneda=moneda,
+        tasa_cambio=tasa,
+        monto_original=pedido.total,
+        saldo=pedido.total,
+        tasa_bcv=pedido.tasa_bcv,
+        tasa_bcv_vigente_desde=pedido.tasa_bcv_vigente_desde,
+        fecha_emision=pedido.fecha,
+        fecha_vencimiento=None,
+        estado=Deuda.Estado.PENDIENTE,
+        created_by=user if user and user.is_authenticated else None,
+    )
+    deuda.full_clean()
+    deuda.save()
+    from apps.finances.services import crear_plan_cuotas
+
+    crear_plan_cuotas(deuda, numero_cuotas=1, fecha_base=pedido.fecha, user=user)
+    deuda.refresh_from_db()
+    logger.info(
+        "Finanzas: deuda %s creada para cobro previo de pedido contado %s",
+        deuda.id,
+        pedido.numero,
+    )
+    return deuda
+
+
+@transaction.atomic
 def confirmar_pedido(
-    pedido: Pedido, numero_cuotas: int = 1, fecha_vencimiento=None, user=None
+    pedido: Pedido,
+    numero_cuotas: int = 1,
+    fecha_vencimiento=None,
+    fecha_primera_cuota=None,
+    plan_cuotas=None,
+    user=None,
 ) -> Pedido:
-    """Confirma el pedido: descuenta stock y, si es a crédito, crea la deuda."""
+    """Confirma el pedido: descuenta stock y gestiona deuda según tipo de pago."""
     pedido = Pedido.objects.select_for_update().get(pk=pedido.pk)
     if pedido.estado != Pedido.Estado.BORRADOR:
         raise BusinessRuleError("Solo se pueden confirmar pedidos en borrador.")
@@ -420,6 +723,42 @@ def confirmar_pedido(
     empresa = get_empresa()
     if empresa is None:
         raise BusinessRuleError("Primero configura los datos fiscales de la empresa.")
+
+    if pedido.tipo_pago == Pedido.TipoPago.CONTADO:
+        try:
+            deuda = pedido.deuda
+        except Deuda.DoesNotExist:
+            deuda = None
+        if deuda is None:
+            raise BusinessRuleError(
+                "Para pedidos de contado debes registrar el pago "
+                "(Deudas y Cobros) antes de confirmar."
+            )
+        if deuda.estado != Deuda.Estado.PAGADA or deuda.saldo > Decimal("0.00"):
+            raise BusinessRuleError(
+                "El pedido de contado debe estar pagado en su totalidad antes de confirmar."
+            )
+    else:
+        plan_fuente = plan_cuotas if plan_cuotas is not None else (pedido.plan_cuotas or [])
+        fecha_primera_fuente = (
+            fecha_primera_cuota
+            if fecha_primera_cuota is not None
+            else pedido.fecha_primera_cuota
+        )
+        n_cuotas_norm, fecha_primera_norm, plan_norm = _normalizar_plan_cuotas(
+            pedido.tipo_pago,
+            numero_cuotas if numero_cuotas is not None else pedido.numero_cuotas,
+            fecha_primera_fuente,
+            plan_fuente,
+            pedido.total,
+            pedido.fecha,
+        )
+        pedido.numero_cuotas = n_cuotas_norm
+        pedido.fecha_primera_cuota = fecha_primera_norm
+        pedido.plan_cuotas = plan_norm
+        pedido.save(
+            update_fields=["numero_cuotas", "fecha_primera_cuota", "plan_cuotas", "updated_at"]
+        )
 
     for detalle in pedido.detalles.select_related("producto", "combo"):
         if detalle.producto is not None:
@@ -478,12 +817,12 @@ def confirmar_pedido(
     pedido.save(update_fields=["estado", "updated_at"])
 
     if pedido.tipo_pago == Pedido.TipoPago.CREDITO:
-        try:
-            n_cuotas = int(pedido.numero_cuotas or numero_cuotas or 1)
-        except (TypeError, ValueError):
-            n_cuotas = 1
-        n_cuotas = max(1, min(8, n_cuotas))
-        _crear_deuda_desde_pedido(pedido, fecha_vencimiento, numero_cuotas=n_cuotas, user=user)
+        _crear_deuda_desde_pedido(
+            pedido,
+            fecha_vencimiento,
+            numero_cuotas=pedido.numero_cuotas,
+            user=user,
+        )
 
     logger.info(
         "Pedidos: %s confirmado por %s (tipo_pago=%s)",
@@ -500,9 +839,22 @@ def _crear_deuda_desde_pedido(
     """Crea la Deuda asociada a un pedido confirmado a crédito y su plan de cuotas."""
     from apps.finances.services import crear_plan_cuotas
 
+    existente = Deuda.objects.filter(pedido=pedido).first()
+    if existente is not None:
+        raise BusinessRuleError(
+            "Este pedido ya tiene una deuda registrada. Revisa el cobro asociado antes de confirmar."
+        )
+
     empresa = get_empresa()
     moneda = pedido.moneda or empresa.moneda_base
     tasa = pedido.tasa_cambio or Decimal("1.000000")
+
+    plan = (
+        pedido.plan_cuotas
+        if isinstance(pedido.plan_cuotas, list) and pedido.plan_cuotas
+        else None
+    )
+    fecha_base = pedido.fecha_primera_cuota or pedido.fecha
 
     deuda = Deuda(
         cliente=pedido.cliente,
@@ -521,7 +873,14 @@ def _crear_deuda_desde_pedido(
     deuda.full_clean()
     deuda.save()
 
-    crear_plan_cuotas(deuda, numero_cuotas=numero_cuotas, fecha_base=pedido.fecha, user=user)
+    crear_plan_cuotas(
+        deuda,
+        numero_cuotas=numero_cuotas or pedido.numero_cuotas or 1,
+        fecha_base=fecha_base,
+        periodicidad_dias=7,
+        user=user,
+        plan=plan,
+    )
     deuda.refresh_from_db()
 
     logger.info(
@@ -529,7 +888,7 @@ def _crear_deuda_desde_pedido(
         deuda.id,
         pedido.numero,
         pedido.cliente.nombre,
-        numero_cuotas,
+        numero_cuotas or pedido.numero_cuotas,
     )
     return deuda
 
@@ -646,11 +1005,32 @@ def anular_pedido(pedido: Pedido, motivo: str, user=None) -> Pedido:
 
 
 @transaction.atomic
+@transaction.atomic
 def entregar_pedido(pedido: Pedido, user=None) -> Pedido:
     """Marca el pedido como entregado."""
-    pedido = Pedido.objects.select_for_update().get(pk=pedido.pk)
+    pedido = (
+        Pedido.objects.select_for_update()
+        .select_related("cliente")
+        .get(pk=pedido.pk)
+    )
     if pedido.estado != Pedido.Estado.CONFIRMADO:
         raise BusinessRuleError("Solo se pueden entregar pedidos confirmados.")
+
+    # Para ventas de contado, la cobranza debe registrarse antes de la entrega.
+    if pedido.tipo_pago == Pedido.TipoPago.CONTADO:
+        from apps.finances.models import Deuda
+
+        try:
+            deuda = Deuda.objects.select_for_update().get(pedido=pedido)
+        except Deuda.DoesNotExist as exc:
+            raise BusinessRuleError(
+                "Debes registrar la cobranza del pedido de contado antes de entregarlo."
+            ) from exc
+        if deuda.estado != Deuda.Estado.PAGADA or money(deuda.saldo) > Decimal("0.00"):
+            raise BusinessRuleError(
+                "Debes registrar la cobranza completa del pedido de contado antes de entregarlo."
+            )
+
     pedido.estado = Pedido.Estado.ENTREGADO
     pedido.save(update_fields=["estado", "updated_at"])
     logger.info(

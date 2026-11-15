@@ -45,6 +45,11 @@ export async function anularPedido(id, motivo) {
   return data;
 }
 
+export async function prepararCobroContadoPedido(id) {
+  const { data } = await api.post(`/pedidos/${id}/preparar-cobro-contado/`, {});
+  return data;
+}
+
 /**
  * Tasa aplicable al documento según el par moneda/base y la fecha del documento.
  */

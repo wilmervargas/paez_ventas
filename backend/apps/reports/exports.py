@@ -5,9 +5,11 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal
 from io import BytesIO
+from pathlib import Path
 from xml.sax.saxutils import escape
 
 from openpyxl import Workbook
+from openpyxl.drawing.image import Image as XlsxImage
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from reportlab.lib import colors
@@ -16,7 +18,7 @@ from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from apps.company.models import Empresa
 from apps.company.services import get_moneda_base
@@ -27,8 +29,8 @@ from apps.company.services import get_moneda_base
 
 TIPO_DECIMALES = {
     "money": 2,
-    "qty": 3,
-    "rate": 6,
+    "qty": 2,
+    "rate": 2,
     "percent": 2,
 }
 
@@ -46,15 +48,15 @@ def _locale_number(value, places: int) -> str:
     return texto.translate(str.maketrans({",": ".", ".": ","}))
 
 
-def _texto_celda(value, tipo: str) -> str:
+def _texto_celda(value, tipo: str, moneda_base: str = "USD") -> str:
     if value in (None, ""):
         return "—"
     if tipo == "money":
         return _locale_number(value, 2)
     if tipo == "qty":
-        return _locale_number(value, 3)
+        return _locale_number(value, 2)
     if tipo == "rate":
-        return _locale_number(value, 6)
+        return _locale_number(value, 2)
     if tipo == "percent":
         return f"{_locale_number(value, 2)} %"
     if tipo == "int":
@@ -72,12 +74,20 @@ def _texto_celda(value, tipo: str) -> str:
     return str(value)
 
 
-def _empresa_datos() -> tuple[str, str, str]:
+def _empresa_datos() -> tuple[str, str, str, str | None]:
     empresa = Empresa.get_solo()
     if empresa is None:
-        return "Sistema de gestión", "", get_moneda_base(None)
+        return "Sistema de gestión", "", get_moneda_base(None), None
     nombre = empresa.nombre_comercial or empresa.razon_social
-    return nombre, empresa.rif, get_moneda_base(empresa)
+    logo_path = None
+    if getattr(empresa, "logo", None):
+        try:
+            path = Path(empresa.logo.path)
+            if path.is_file():
+                logo_path = str(path)
+        except Exception:
+            logo_path = None
+    return nombre, empresa.rif, get_moneda_base(empresa), logo_path
 
 
 def _linea_filtros(payload: dict) -> str:
@@ -246,10 +256,18 @@ def render_pdf(payload: dict, empresa=None) -> bytes:
         author=_empresa_datos()[0],
     )
 
-    nombre, rif, moneda = _empresa_datos()
-    elementos = [
-        Paragraph(escape(nombre), estilos["empresa"]),
-    ]
+    nombre, rif, moneda, logo_path = _empresa_datos()
+    elementos = []
+    if logo_path:
+        try:
+            logo = Image(logo_path)
+            logo._restrictSize(28 * mm, 18 * mm)
+            logo.hAlign = "LEFT"
+            elementos.append(logo)
+            elementos.append(Spacer(1, 1.5 * mm))
+        except Exception:
+            pass
+    elementos.append(Paragraph(escape(nombre), estilos["empresa"]))
     if rif:
         elementos.append(Paragraph(f"RIF {escape(rif)}", estilos["meta"]))
     elementos.append(Spacer(1, 2 * mm))
@@ -257,8 +275,7 @@ def render_pdf(payload: dict, empresa=None) -> bytes:
     elementos.append(Spacer(1, 1 * mm))
     elementos.append(
         Paragraph(
-            f"Generado: {_generado(payload)} · Moneda base: {escape(moneda)} · "
-            f"Registros: {payload['total_filas']}",
+            f"Generado: {_generado(payload)} · Registros: {payload['total_filas']}",
             estilos["meta"],
         )
     )
@@ -266,6 +283,7 @@ def render_pdf(payload: dict, empresa=None) -> bytes:
     elementos.append(Spacer(1, 3 * mm))
 
     columnas = payload["columnas"]
+    moneda_base = payload.get("moneda_base") or moneda
     pesos = [_peso_columna(col) for col in columnas]
     ancho_disponible = pagina[0] - 18 * mm
     unidad = ancho_disponible / sum(pesos)
@@ -280,7 +298,7 @@ def render_pdf(payload: dict, empresa=None) -> bytes:
     for fila in payload["filas"]:
         celdas = []
         for col in columnas:
-            valor = _texto_celda(fila.get(col["key"]), col.get("type", "text"))
+            valor = _texto_celda(fila.get(col["key"]), col.get("type", "text"), moneda_base)
             estilo = estilos["cell_right"] if col.get("align") == "right" else estilos["cell"]
             celdas.append(Paragraph(escape(valor), estilo))
         datos.append(celdas)
@@ -291,7 +309,11 @@ def render_pdf(payload: dict, empresa=None) -> bytes:
         fila_total = [Paragraph("TOTALES", estilos["total"])]
         for col in columnas[1:]:
             valor = totales.get(col["key"])
-            texto = _texto_celda(valor, col.get("type", "text")) if valor not in (None, "") else ""
+            texto = (
+                _texto_celda(valor, col.get("type", "text"), moneda_base)
+                if valor not in (None, "")
+                else ""
+            )
             estilo = estilos["total_right"] if col.get("align") == "right" else estilos["total"]
             fila_total.append(Paragraph(escape(texto), estilo))
         datos.append(fila_total)
@@ -372,14 +394,29 @@ def _ancho_excel(value) -> int:
 
 
 def render_xlsx(payload: dict, empresa=None) -> bytes:
-    nombre, rif, moneda = _empresa_datos()
+    nombre, rif, moneda, logo_path = _empresa_datos()
     libro = Workbook()
     hoja = libro.active
     hoja.title = payload["titulo"][:31]
+    moneda_base = payload.get("moneda_base") or moneda
 
-    hoja["A1"] = nombre
-    hoja["A1"].font = Font(bold=True, size=14, color="1E293B")
-    posicion = 2
+    posicion = 1
+    if logo_path:
+        try:
+            img = XlsxImage(logo_path)
+            max_h = 55
+            if img.height and img.height > max_h:
+                ratio = max_h / float(img.height)
+                img.height = max_h
+                img.width = int(img.width * ratio)
+            hoja.add_image(img, "A1")
+            posicion = 5
+        except Exception:
+            posicion = 1
+
+    hoja.cell(row=posicion, column=1, value=nombre)
+    hoja.cell(row=posicion, column=1).font = Font(bold=True, size=14, color="1E293B")
+    posicion += 1
     if rif:
         hoja.cell(row=posicion, column=1, value=f"RIF {rif}")
         hoja.cell(row=posicion, column=1).font = Font(size=9, color="64748B")
@@ -391,8 +428,7 @@ def render_xlsx(payload: dict, empresa=None) -> bytes:
         row=posicion,
         column=1,
         value=(
-            f"Generado: {_generado(payload)} · Moneda base: {moneda} · "
-            f"Registros: {payload['total_filas']}"
+            f"Generado: {_generado(payload)} · Registros: {payload['total_filas']}"
         ),
     )
     hoja.cell(row=posicion, column=1).font = Font(size=9, color="64748B")
@@ -414,8 +450,8 @@ def render_xlsx(payload: dict, empresa=None) -> bytes:
 
     formatos = {
         "money": "#,##0.00",
-        "qty": "#,##0.000",
-        "rate": "#,##0.000000",
+        "qty": "#,##0.00",
+        "rate": "#,##0.00",
         "percent": '0.00"%"',
         "int": "#,##0",
         "date": "dd/mm/yyyy",
@@ -449,16 +485,20 @@ def render_xlsx(payload: dict, empresa=None) -> bytes:
         bordes_totales = Border(top=Side(style="medium", color="94A3B8"))
         for indice, col in enumerate(columnas, start=1):
             if indice == 1:
-                valor = "TOTALES"
+                celda = hoja.cell(row=fila_actual, column=indice, value="TOTALES")
             else:
                 tipo = col.get("type", "text")
-                valor = _excel_valor(totales.get(col["key"]), tipo)
-            celda = hoja.cell(row=fila_actual, column=indice, value=valor)
+                raw = totales.get(col["key"])
+                if raw in (None, ""):
+                    celda = hoja.cell(row=fila_actual, column=indice, value=None)
+                else:
+                    valor = _excel_valor(raw, tipo)
+                    celda = hoja.cell(row=fila_actual, column=indice, value=valor)
+                    if tipo in formatos:
+                        celda.number_format = formatos[tipo]
             celda.font = Font(bold=True, size=9, color="0F172A")
             celda.fill = PatternFill("solid", fgColor="E2E8F0")
             celda.border = bordes_totales
-            if indice > 1 and col.get("type") in formatos:
-                celda.number_format = formatos[col.get("type")]
             if col.get("align") == "right":
                 celda.alignment = Alignment(horizontal="right")
 

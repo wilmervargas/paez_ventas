@@ -5,11 +5,13 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
+from apps.common.exceptions import BusinessRuleError
 from apps.common.permissions import (
     IsAdmin,
     IsAuthenticatedAndCompanyReady,
     RoleBasedAccess,
 )
+from apps.finances.serializers import DeudaSerializer
 
 from .models import Pedido
 from .serializers import (
@@ -18,6 +20,7 @@ from .serializers import (
     EntregarPedidoSerializer,
     PedidoSerializer,
 )
+from .services import asegurar_deuda_contado_borrador
 
 
 class PedidoAccess(RoleBasedAccess):
@@ -94,3 +97,19 @@ class PedidoViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         pedido = serializer.save()
         return Response(self.get_serializer(pedido).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="preparar-cobro-contado")
+    def preparar_cobro_contado(self, request, pk=None):
+        pedido = self.get_object()
+        try:
+            deuda = asegurar_deuda_contado_borrador(pedido, user=request.user)
+        except BusinessRuleError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        from apps.finances.models import Deuda
+
+        deuda = (
+            Deuda.objects.select_related("cliente", "pedido", "created_by", "anulado_por")
+            .prefetch_related("cuotas")
+            .get(pk=deuda.pk)
+        )
+        return Response(DeudaSerializer(deuda).data, status=status.HTTP_200_OK)

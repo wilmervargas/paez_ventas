@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { ArrowRightLeft, BarChart3, Banknote, Boxes, Building2, ChevronDown, DatabaseZap, LayoutDashboard, MessageCircle, Package, ShieldCheck, ShoppingCart, Truck, Users, Wallet, X } from "lucide-react";
+﻿import { useState } from "react";
+import { BarChart3, Banknote, Boxes, Building2, ChevronDown, DatabaseBackup, LayoutDashboard, MessageCircle, Package, ShieldCheck, ShoppingCart, Truck, Users, Wallet, X } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../../context/auth-context";
 import { useCompany } from "../../context/company-context";
@@ -47,7 +47,6 @@ const groups = [
         items: [
             { label: "Deudas y cobros", icon: Wallet, to: "/app/deudas", roles: ["admin", "vendedor", "cobrador"] },
             { label: "Caja", icon: Banknote, to: "/app/caja", roles: ["admin", "cobrador"] },
-            { label: "Tasas de cambio", icon: ArrowRightLeft, to: "/app/tasas", roles: ["admin"] },
             {
                 label: "Reportes",
                 icon: BarChart3,
@@ -92,14 +91,14 @@ const groups = [
             { label: "WhatsApp", icon: MessageCircle, to: "/app/whatsapp", roles: ["admin", "cobrador"] },
             { label: "Empresa", icon: Building2, to: "/app/empresa", adminOnly: true },
             { label: "Usuarios", icon: ShieldCheck, to: "/app/usuarios", superuserOnly: true },
-            { label: "Limpiar BD", icon: DatabaseZap, to: "/app/mantenimiento", superuserOnly: true },
+            { label: "Hacer respaldo", icon: DatabaseBackup, to: "/app/mantenimiento", superuserOnly: true },
         ],
     },
 ];
 export function Sidebar({ open, onClose }) {
     const { user } = useAuth();
     const { company } = useCompany();
-    const [openSubmenu, setOpenSubmenu] = useState("Reportes");
+    const [openSubmenu, setOpenSubmenu] = useState(null);
     return (<aside className={cn("fixed inset-y-0 left-0 z-40 flex w-[12.6rem] transform flex-col bg-slate-900 text-slate-300 transition-transform duration-200 lg:translate-x-0", open ? "translate-x-0" : "-translate-x-full")} aria-label="Navegación principal">
       <div className="flex h-16 items-center justify-between border-b border-white/10 px-5">
         <div className="flex items-center gap-3">

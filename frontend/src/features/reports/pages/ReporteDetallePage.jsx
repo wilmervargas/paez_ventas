@@ -164,7 +164,7 @@ export function ReporteDetallePage({ tipo }) {
       <Card>
         <CardHeader
           title="Filtros"
-          description="Ajusta el período y los criterios. Los totales se consolidan en la moneda base de la empresa."
+          description="Ajusta el período y los criterios para generar el reporte."
           action={
             isFetching && !isLoading ? (
               <span className="inline-flex items-center gap-2 text-xs font-medium text-slate-500">
@@ -251,7 +251,7 @@ export function ReporteDetallePage({ tipo }) {
           <Card>
             <CardHeader
               title={`Detalle (${data.total_filas} ${data.total_filas === 1 ? "registro" : "registros"})`}
-              description={`Moneda base: ${data.moneda_base} · Generado: ${formatDateTime(data.generado_en)}`}
+              description={`Generado: ${formatDateTime(data.generado_en)}`}
               action={
                 <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500">
                   <Download className="h-3.5 w-3.5" />

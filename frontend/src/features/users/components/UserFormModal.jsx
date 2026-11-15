@@ -127,7 +127,7 @@ export function UserFormModal({ user, onClose }) {
           </label>
         </div>
         <p className="text-xs text-slate-500">
-          Los superusuarios tienen acceso a gestión de usuarios y mantenimiento (limpiar base de datos).
+          Los superusuarios tienen acceso a gestión de usuarios y respaldo del sistema.
         </p>
         <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
           <Button type="button" variant="secondary" onClick={onClose}>Cancelar</Button>

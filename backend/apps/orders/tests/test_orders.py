@@ -65,6 +65,34 @@ def _pedido_payload(cliente, detalles, **overrides):
     return payload
 
 
+def _pagar_pedido_contado(client, pedido_id):
+    """Prepara el cobro del pedido de contado y registra el pago total."""
+    prep = client.post(
+        reverse("pedido-preparar-cobro-contado", args=[pedido_id]), format="json"
+    )
+    assert prep.status_code == 200, prep.data
+    deuda_id = prep.data["id"]
+    monto = prep.data["saldo"] or prep.data["monto_original"]
+    pago = client.post(
+        reverse("pago-list"),
+        {
+            "deuda_id": deuda_id,
+            "monto": monto,
+            "metodo": "transferencia",
+            "fecha_pago": timezone.localdate().isoformat(),
+            "referencia": "TEST-PAGO",
+        },
+        format="json",
+    )
+    assert pago.status_code == 201, pago.data
+    return pago
+
+
+def _confirmar_contado(client, pedido_id):
+    _pagar_pedido_contado(client, pedido_id)
+    return client.post(reverse("pedido-confirmar", args=[pedido_id]), format="json")
+
+
 # ---------------------------------------------------------------------------
 # Creación en borrador (sin afectar stock)
 # ---------------------------------------------------------------------------
@@ -143,9 +171,7 @@ def test_confirmar_pedido_descuenta_stock_producto_suelto(admin_client, empresa,
         format="json",
     )
 
-    response = admin_client.post(
-        reverse("pedido-confirmar", args=[creada.data["id"]]), format="json"
-    )
+    response = _confirmar_contado(admin_client, creada.data["id"])
 
     assert response.status_code == 200
     assert response.data["estado"] == "confirmado"
@@ -173,9 +199,7 @@ def test_confirmar_pedido_stock_insuficiente(admin_client, empresa, cliente, pro
         format="json",
     )
 
-    response = admin_client.post(
-        reverse("pedido-confirmar", args=[creada.data["id"]]), format="json"
-    )
+    response = _confirmar_contado(admin_client, creada.data["id"])
 
     assert response.status_code == 400
     assert response.data["code"] == "business_rule"
@@ -226,9 +250,7 @@ def test_confirmar_pedido_combo_descuenta_componentes(
         format="json",
     )
 
-    response = admin_client.post(
-        reverse("pedido-confirmar", args=[creada.data["id"]]), format="json"
-    )
+    response = _confirmar_contado(admin_client, creada.data["id"])
 
     assert response.status_code == 200
     assert response.data["estado"] == "confirmado"
@@ -269,9 +291,7 @@ def test_confirmar_pedido_combo_stock_insuficiente_componente(
         format="json",
     )
 
-    response = admin_client.post(
-        reverse("pedido-confirmar", args=[creada.data["id"]]), format="json"
-    )
+    response = _confirmar_contado(admin_client, creada.data["id"])
 
     assert response.status_code == 400
     assert response.data["code"] == "business_rule"
@@ -296,7 +316,8 @@ def test_anular_pedido_confirmado_restaura_stock(admin_client, empresa, cliente,
         ),
         format="json",
     )
-    admin_client.post(reverse("pedido-confirmar", args=[creada.data["id"]]), format="json")
+    conf = _confirmar_contado(admin_client, creada.data["id"])
+    assert conf.status_code == 200
 
     producto.refresh_from_db()
     assert producto.stock == Decimal("7.000")
@@ -329,8 +350,10 @@ def test_anular_pedido_entregado_falla(admin_client, empresa, cliente, producto)
         ),
         format="json",
     )
-    admin_client.post(reverse("pedido-confirmar", args=[creada.data["id"]]), format="json")
-    admin_client.post(reverse("pedido-entregar", args=[creada.data["id"]]), format="json")
+    conf = _confirmar_contado(admin_client, creada.data["id"])
+    assert conf.status_code == 200
+    ent = admin_client.post(reverse("pedido-entregar", args=[creada.data["id"]]), format="json")
+    assert ent.status_code == 200
 
     response = admin_client.post(
         reverse("pedido-anular", args=[creada.data["id"]]),
@@ -404,7 +427,8 @@ def test_entregar_pedido_confirmado(admin_client, empresa, cliente, producto):
         ),
         format="json",
     )
-    admin_client.post(reverse("pedido-confirmar", args=[creada.data["id"]]), format="json")
+    conf = _confirmar_contado(admin_client, creada.data["id"])
+    assert conf.status_code == 200
 
     response = admin_client.post(
         reverse("pedido-entregar", args=[creada.data["id"]]), format="json"
@@ -430,6 +454,45 @@ def test_entregar_pedido_borrador_falla(admin_client, empresa, cliente, producto
 
     assert response.status_code == 400
     assert response.data["code"] == "business_rule"
+
+
+def test_pedido_contado_requiere_pago_antes_de_confirmar_y_entregar(
+    admin_client, empresa, cliente, producto
+):
+    producto.stock = Decimal("10.000")
+    producto.save(update_fields=["stock"])
+
+    creada = admin_client.post(
+        reverse("pedido-list"),
+        _pedido_payload(
+            cliente,
+            [{"producto": producto.pk, "cantidad": "1.000", "precio_unitario": "15.00"}],
+        ),
+        format="json",
+    )
+    # Preparar cobro crea la deuda, pero sin pago no se puede confirmar.
+    prep = admin_client.post(
+        reverse("pedido-preparar-cobro-contado", args=[creada.data["id"]]), format="json"
+    )
+    assert prep.status_code == 200
+    conf = admin_client.post(reverse("pedido-confirmar", args=[creada.data["id"]]), format="json")
+    assert conf.status_code == 400
+    assert conf.data["code"] == "business_rule"
+
+    # Incluso si el pedido quedara confirmado, la entrega exige deuda pagada.
+    from apps.finances.models import Deuda
+    from apps.orders.models import Pedido
+
+    pedido = Pedido.objects.get(pk=creada.data["id"])
+    pedido.estado = Pedido.Estado.CONFIRMADO
+    pedido.save(update_fields=["estado"])
+    deuda = Deuda.objects.get(pk=prep.data["id"])
+    assert deuda.saldo > 0
+    entrega = admin_client.post(
+        reverse("pedido-entregar", args=[pedido.id]), format="json"
+    )
+    assert entrega.status_code == 400
+    assert entrega.data["code"] == "business_rule"
 
 
 # ---------------------------------------------------------------------------
@@ -527,7 +590,7 @@ def test_pedido_credito_crea_deuda(admin_client, empresa, cliente, producto):
 # ---------------------------------------------------------------------------
 
 
-def test_vendedor_crea_y_confirma_pedido(auth_client, empresa, cliente, producto):
+def test_vendedor_crea_y_confirma_pedido(auth_client, admin_client, empresa, cliente, producto):
     producto.stock = Decimal("10.000")
     producto.save(update_fields=["stock"])
 
@@ -541,9 +604,8 @@ def test_vendedor_crea_y_confirma_pedido(auth_client, empresa, cliente, producto
     )
     assert creada.status_code == 201
 
-    confirmada = auth_client.post(
-        reverse("pedido-confirmar", args=[creada.data["id"]]), format="json"
-    )
+    # La cobranza de contado la registra un usuario con acceso a cobros (admin/cobrador).
+    confirmada = _confirmar_contado(admin_client, creada.data["id"])
     assert confirmada.status_code == 200
 
 

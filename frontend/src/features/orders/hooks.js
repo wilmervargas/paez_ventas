@@ -12,6 +12,7 @@ import {
   entregarPedido,
   getTasaVigente,
   listPedidos,
+  prepararCobroContadoPedido,
   updatePedido,
 } from "./api";
 
@@ -70,6 +71,18 @@ export function useAnularPedido() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ordersKeys.all });
       void queryClient.invalidateQueries({ queryKey: inventoryKeys.all });
+    },
+  });
+}
+
+export function usePrepararCobroContado() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => prepararCobroContadoPedido(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ordersKeys.all });
+      void queryClient.invalidateQueries({ queryKey: ["deudores-pendientes"] });
+      void queryClient.invalidateQueries({ queryKey: ["deudas"] });
     },
   });
 }

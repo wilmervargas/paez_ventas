@@ -26,10 +26,6 @@ const schema = z.object({
     telefono: z.string().trim(),
     email: z.union([z.literal(""), z.string().email("Correo inválido")]),
     eslogan: z.string().trim(),
-    moneda_base: z
-        .string()
-        .trim()
-        .regex(/^[A-Za-z]{3}$/, "Usa un código ISO de 3 letras (ej. USD)"),
     iva_rate: z
         .string()
         .trim()
@@ -49,7 +45,6 @@ function toFormValues(company) {
         telefono: company?.telefono ?? "",
         email: company?.email ?? "",
         eslogan: company?.eslogan ?? "",
-        moneda_base: company?.moneda_base ?? "USD",
         iva_rate: company?.iva_rate ?? "16.00",
         igtf_rate: company?.igtf_rate ?? "0,00",
     };
@@ -87,7 +82,6 @@ export function CompanyPage() {
         setSuccess(null);
         const payload = {
             ...values,
-            moneda_base: values.moneda_base.toUpperCase(),
         };
         try {
             if (logoFile || quitarLogo) {
@@ -174,8 +168,7 @@ export function CompanyPage() {
 
             <Input label="Eslogan" placeholder="Frase corta para documentos" error={errors.eslogan?.message} {...register("eslogan")}/>
 
-            <div className="grid gap-4 sm:grid-cols-3">
-              <Input label="Moneda base" placeholder="USD" maxLength={3} className="uppercase" error={errors.moneda_base?.message} {...register("moneda_base")}/>
+            <div className="grid gap-4 sm:grid-cols-2">
               <Input label="IVA (%)" inputMode="decimal" placeholder="16,00" error={errors.iva_rate?.message} {...register("iva_rate")}/>
               <Input label="IGTF (%)" inputMode="decimal" placeholder="0,00" error={errors.igtf_rate?.message} {...register("igtf_rate")}/>
             </div>

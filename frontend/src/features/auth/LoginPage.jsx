@@ -1,5 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowRight } from "lucide-react";
+import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -135,7 +136,14 @@ export function LoginPage() {
 
           <form onSubmit={onSubmit} className="mt-6 space-y-4" noValidate>
             <Input label="Correo electrónico" type="email" autoComplete="email" placeholder="tu@empresa.com" error={errors.email?.message} {...register("email")}/>
-            <Input label="Contraseña" type="password" autoComplete="current-password" placeholder="••••••••" error={errors.password?.message} {...register("password")}/>
+            <div className="space-y-1.5">
+              <Input label="Contraseña" type="password" autoComplete="current-password" placeholder="••••••••" error={errors.password?.message} {...register("password")}/>
+              <div className="flex justify-end">
+                <Link to="/forgot-password" className="text-sm font-medium text-indigo-600 hover:text-indigo-500">
+                  ¿Olvidaste tu contraseña?
+                </Link>
+              </div>
+            </div>
             <Button type="submit" loading={isSubmitting} className="w-full" icon={<ArrowRight className="h-4 w-4"/>}>
               Entrar
             </Button>

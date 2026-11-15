@@ -30,6 +30,8 @@ class FinanzasReadCobroAccess(RoleBasedAccess):
 class DeudaFilter(filters.FilterSet):
     pendiente = filters.BooleanFilter(method="filter_pendiente")
     vencida = filters.BooleanFilter(method="filter_vencida")
+    pago_pendiente = filters.BooleanFilter(method="filter_pago_pendiente")
+    semanal = filters.CharFilter(method="filter_semanal")
 
     class Meta:
         model = Deuda
@@ -50,6 +52,39 @@ class DeudaFilter(filters.FilterSet):
                 fecha_vencimiento__lt=timezone.localdate(),
             )
         return qs
+
+    def filter_pago_pendiente(self, qs, name, value):
+        """Deudas con al menos una cuota pendiente cuya fecha de pago ya venció."""
+        if value:
+            from django.utils import timezone
+
+            return qs.filter(
+                estado=Deuda.Estado.PENDIENTE,
+                saldo__gt=0,
+                cuotas__saldo__gt=0,
+                cuotas__fecha_vencimiento__lte=timezone.localdate(),
+            ).distinct()
+        return qs
+
+    def filter_semanal(self, qs, name, value):
+        """Filtra planes de pago semanales (crédito en cuotas): pendientes o retrasados."""
+        value = (value or "").strip().lower()
+        if value not in {"pendiente", "retrasado"}:
+            return qs
+        from django.utils import timezone
+
+        qs = qs.filter(
+            estado=Deuda.Estado.PENDIENTE,
+            saldo__gt=0,
+            pedido__tipo_pago="credito",
+        )
+        if value == "pendiente":
+            return qs.filter(cuotas__saldo__gt=0).distinct()
+        # retrasado: con cuotas pendientes vencidas
+        return qs.filter(
+            cuotas__saldo__gt=0,
+            cuotas__fecha_vencimiento__lt=timezone.localdate(),
+        ).distinct()
 
 
 class DeudaViewSet(viewsets.ReadOnlyModelViewSet):
