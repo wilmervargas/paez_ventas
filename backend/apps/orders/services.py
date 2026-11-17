@@ -71,7 +71,7 @@ def _normalizar_plan_cuotas(
         n = int(numero_cuotas or 1)
     except (TypeError, ValueError):
         n = 1
-    n = max(1, min(8, n))
+    n = max(1, min(10, n))
 
     total = money(total)
     fecha_base = _parse_fecha_cuota(fecha_primera_cuota) or fecha_pedido
@@ -97,6 +97,13 @@ def _normalizar_plan_cuotas(
 
             fecha = fecha_base + timedelta(days=7 * i)
         fechas.append(fecha)
+
+    # Si el plan recibido trae montos explícitos pero todos en cero (p.ej. por
+    # un error de cálculo/conversión en el cliente), se regenera distribución
+    # equitativa en lugar de dejar todas las cuotas en 0 salvo la última.
+    montos_explicitos = [m for m in montos if m is not None]
+    if montos_explicitos and total > 0 and sum(montos_explicitos, Decimal("0.00")) <= Decimal("0.00"):
+        montos = [None] * n
 
     base = (to_decimal(total) / Decimal(n)).quantize(TWO_PLACES, rounding=ROUND_HALF_UP)
     normalizados = []
@@ -303,7 +310,15 @@ def crear_pedido(data: dict, detalles: list[dict], user=None) -> Pedido:
         raise BusinessRuleError("Primero configura los datos fiscales de la empresa.")
 
     datos = {campo: data[campo] for campo in CAMPOS_PEDIDO if campo in data}
-    fecha = datos.get("fecha") or timezone.localdate()
+
+    # Fecha del pedido: se trata individualmente y se guarda tal cual viene del formulario (campo "Fecha *").
+    # Solo si no se envía, se usa la fecha actual como respaldo.
+    if "fecha" in data and data.get("fecha") is not None:
+        fecha = data["fecha"]
+    else:
+        fecha = timezone.localdate()
+    datos["fecha"] = fecha
+
     moneda = (datos.get("moneda") or empresa.moneda_base or "USD").upper()
     tasa = _resolver_tasa(moneda, datos.get("tasa_cambio"), empresa, fecha)
     otros_montos = money(to_decimal(datos.get("otros_montos", 0)))
@@ -375,7 +390,7 @@ def crear_pedido(data: dict, detalles: list[dict], user=None) -> Pedido:
         }
     )
 
-    numero = siguiente_numero("pedido", "PED", datos["fecha"].year)
+    numero = siguiente_numero("pedido", "PED", fecha.year)
 
     pedido = Pedido(
         **datos,
@@ -520,9 +535,20 @@ def actualizar_pedido(pedido: Pedido, data: dict, detalles: list[dict] | None, u
         raise BusinessRuleError("Primero configura los datos fiscales de la empresa.")
 
     datos = {campo: data[campo] for campo in CAMPOS_PEDIDO if campo in data}
-    fecha = datos.get("fecha") or pedido.fecha
+
+    # Fecha del pedido: se trata individualmente y se guarda tal cual viene del formulario (campo "Fecha *").
+    # Si no se envía en la actualización, se conserva la fecha ya registrada del pedido.
+    if "fecha" in data and data.get("fecha") is not None:
+        fecha = data["fecha"]
+    else:
+        fecha = pedido.fecha
+    datos["fecha"] = fecha
+
     moneda = (datos.get("moneda") or pedido.moneda or empresa.moneda_base or "USD").upper()
-    tasa = _resolver_tasa(moneda, datos.get("tasa_cambio"), empresa, fecha)
+    if "tasa_cambio" in data:
+        tasa = _resolver_tasa(moneda, datos.get("tasa_cambio"), empresa, fecha)
+    else:
+        tasa = pedido.tasa_cambio
 
     otros_montos = money(to_decimal(datos.get("otros_montos", pedido.otros_montos)))
     if otros_montos < 0:

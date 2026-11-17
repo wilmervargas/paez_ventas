@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { Alert } from "../../../components/ui/Alert";
+import { Badge } from "../../../components/ui/Badge";
 import { Button } from "../../../components/ui/Button";
 import { Input } from "../../../components/ui/Input";
 import { Modal } from "../../../components/ui/Modal";
 import { Select } from "../../../components/ui/Select";
 import { TextArea } from "../../../components/ui/TextArea";
 import { BANCOS_VE } from "../../../lib/banks-ve";
+import { formatDate } from "../../../lib/dates";
 import { formatInputDecimal } from "../../../lib/decimal";
 import { getErrorMessage } from "../../../lib/errors";
 import { formatMoney } from "../../../lib/money";
@@ -52,7 +54,10 @@ export function RegistrarPagoModal({ deuda, onClose }) {
   const mutation = useRegistrarPago();
   const [error, setError] = useState(null);
 
-  const saldoInicial = deuda.proxima_cuota?.saldo ?? deuda.saldo ?? "";
+  const cuotaAPagar =
+    deuda.proxima_cuota ||
+    (Array.isArray(deuda.cuotas) ? deuda.cuotas.find((c) => Number(c.saldo || 0) > 0) : null);
+  const saldoInicial = cuotaAPagar?.saldo ?? deuda.saldo ?? "";
   const [fechaPago, setFechaPago] = useState(() => new Date().toISOString().slice(0, 10));
   const [metodo, setMetodo] = useState("pago_movil");
   const [referencia, setReferencia] = useState("");
@@ -127,6 +132,24 @@ export function RegistrarPagoModal({ deuda, onClose }) {
     >
       <form id="form-registro-pago" onSubmit={onSubmit} className="space-y-4 text-sm">
         {error ? <Alert tone="error">{error}</Alert> : null}
+        {cuotaAPagar ? (
+          <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-3">
+            <p className="text-sm font-semibold text-slate-900">Cuota a cancelar</p>
+            <div className="mt-2 grid gap-x-4 gap-y-2 sm:grid-cols-2">
+              <p><span className="text-slate-500">Cuota:</span> <strong>#{cuotaAPagar.numero}</strong></p>
+              <p><span className="text-slate-500">Estado:</span> <Badge tone={cuotaAPagar.vencida ? "danger" : cuotaAPagar.estado === "parcial" ? "warning" : "info"}>{cuotaAPagar.estado_display || cuotaAPagar.estado || "Pendiente"}</Badge></p>
+              <p><span className="text-slate-500">Monto de la cuota:</span> <strong>{formatMoney(cuotaAPagar.monto, deuda.moneda)}</strong></p>
+              <p><span className="text-slate-500">Saldo pendiente:</span> <strong>{formatMoney(cuotaAPagar.saldo ?? cuotaAPagar.monto, deuda.moneda)}</strong></p>
+              <p className="sm:col-span-2"><span className="text-slate-500">Fecha de vencimiento:</span> <strong>{cuotaAPagar.fecha_vencimiento ? formatDate(cuotaAPagar.fecha_vencimiento) : "—"}</strong></p>
+            </div>
+            <p className="mt-2 text-xs text-slate-600">Esta es la cuota a la que se aplicará el pago (la más antigua pendiente). Si el monto excede su saldo, el resto se aplicará a las siguientes cuotas.</p>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-slate-200 p-3">
+            <p className="text-sm font-semibold text-slate-900">Monto a cancelar</p>
+            <p className="mt-1 text-sm text-slate-700">Saldo pendiente de la deuda: <strong>{formatMoney(deuda.saldo, deuda.moneda)}</strong></p>
+          </div>
+        )}
         <Alert tone="info">
           El pago se aplica automáticamente a la(s) cuota(s) pendiente(s) más antigua(s). Si cambias la moneda de pago, el monto y la tasa se recalculan usando la tasa registrada en el documento. Si es en efectivo, requiere una sesión de caja abierta.
         </Alert>

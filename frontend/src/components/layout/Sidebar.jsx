@@ -1,5 +1,5 @@
 ﻿import { useState } from "react";
-import { BarChart3, Banknote, Boxes, Building2, ChevronDown, DatabaseBackup, LayoutDashboard, MessageCircle, Package, ShieldCheck, ShoppingCart, Truck, Users, Wallet, X } from "lucide-react";
+import { BarChart3, Banknote, Boxes, Building2, ChevronDown, LayoutDashboard, MessageCircle, Package, ShieldCheck, ShoppingCart, Truck, Users, Wallet, X } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../../context/auth-context";
 import { useCompany } from "../../context/company-context";
@@ -46,7 +46,7 @@ const groups = [
         title: "Finanzas",
         items: [
             { label: "Deudas y cobros", icon: Wallet, to: "/app/deudas", roles: ["admin", "vendedor", "cobrador"] },
-            { label: "Caja", icon: Banknote, to: "/app/caja", roles: ["admin", "cobrador"] },
+            // { label: "Caja", icon: Banknote, to: "/app/caja", roles: ["admin", "cobrador"], disabled: true },
             {
                 label: "Reportes",
                 icon: BarChart3,
@@ -91,7 +91,6 @@ const groups = [
             { label: "WhatsApp", icon: MessageCircle, to: "/app/whatsapp", roles: ["admin", "cobrador"] },
             { label: "Empresa", icon: Building2, to: "/app/empresa", adminOnly: true },
             { label: "Usuarios", icon: ShieldCheck, to: "/app/usuarios", superuserOnly: true },
-            { label: "Hacer respaldo", icon: DatabaseBackup, to: "/app/mantenimiento", superuserOnly: true },
         ],
     },
 ];

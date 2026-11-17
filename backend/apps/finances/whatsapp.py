@@ -176,7 +176,7 @@ def resumen_cobro(deuda, mensaje: str | None = None) -> dict:
     total_deudas = deudas_qs.count()
     deudas = list(
         deudas_qs.select_related("pedido")
-        .prefetch_related("cuotas")
+        .prefetch_related("cuotas__aplicaciones__pago")
         .order_by("fecha_vencimiento", "-fecha_emision", "-id")
     )
     totales = list(deudas_qs.values("moneda").annotate(total=Sum("saldo")).order_by("moneda"))
@@ -193,13 +193,15 @@ def resumen_cobro(deuda, mensaje: str | None = None) -> dict:
 
     if deudas:
         for item in deudas:
-            linea = f"• Pedido {item.pedido.numero}: {_fmt_monto(item.saldo, item.moneda)}"
+            linea = f"Pedido {item.pedido.numero}: {_fmt_monto(item.saldo, item.moneda)}"
             if item.fecha_vencimiento:
                 linea += f" · vence {_fmt_fecha(item.fecha_vencimiento)}"
             proxima = next((c for c in item.cuotas.all() if c.saldo > 0), None)
-            if proxima and not item.fecha_vencimiento:
-                linea += f" · próxima cuota {_fmt_fecha(proxima.fecha_vencimiento)}"
-            lineas.append(linea)
+            if proxima:
+                if not item.fecha_vencimiento:
+                    linea += f" · próxima cuota {_fmt_fecha(proxima.fecha_vencimiento)}"
+                linea += f" · pendiente por pagar {_fmt_monto(proxima.saldo, item.moneda)}"
+            lineas.append(f"• *_{linea}_*")
         # Se incluyen todas las deudas pendientes del cliente.
     else:
         lineas.append("• Sin deudas pendientes.")
@@ -207,17 +209,23 @@ def resumen_cobro(deuda, mensaje: str | None = None) -> dict:
     lineas.append("")
     if totales:
         resumen_total = " + ".join(_fmt_monto(t["total"], t["moneda"]) for t in totales)
-        lineas.append(f"*Total pendiente:* {resumen_total}")
+        lineas.append(f"*Total pendiente:* *_{resumen_total}_*")
     else:
-        lineas.append("*Total pendiente:* $ 0,00")
+        lineas.append("*Total pendiente:* *_$ 0,00_*")
 
     lineas.extend(["", "*Pagos registrados:*"])
     if pagos:
         for pago in pagos:
-            lineas.append(
-                f"• {_fmt_fecha(pago.fecha_pago)} · {_fmt_monto(pago.monto, pago.moneda)}"
-                f" · {pago.get_metodo_display()}"
-            )
+            detalle = [
+                f"• {_fmt_fecha(pago.fecha_pago)}",
+                _fmt_monto(pago.monto, pago.moneda),
+                f"Método: {pago.get_metodo_display()}",
+            ]
+            banco = (getattr(pago, "banco", "") or "").strip()
+            referencia = (getattr(pago, "referencia", "") or "").strip()
+            detalle.append(f"Banco: {banco or '—'}")
+            detalle.append(f"Referencia: {referencia or '—'}")
+            lineas.append(" · ".join(detalle))
         # Se incluyen todos los pagos registrados del cliente.
     else:
         lineas.append("• Sin pagos registrados.")

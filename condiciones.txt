@@ -1,5 +1,0 @@
-En el modulo pedidos, Cuando se haga un pedido de contado, tienes que hacer la cobranza de una vez. Asi como se hace en el modulo de Deudas y cobros. eso debes hacerlo antes de que se haga la entrega del pedido.
-
-En el modulo de usuarios, integra en lo que ya existe, la recuperacion de la clave por correo electronico de cualquier usuario que este registrado. haz tu mismo las validaciones. tambien permite que cuando el ususario este introduciendo la clave se permita ver con el ojito.
-
-En el panel del menu que esta a la izquierda, hay una opcio que se llama limpiar base de datos. eliminala de alli y sustituyela por la opcion de hacer respaldo. ese respaldo vas a mandar un correo que tenga el archivo db.sqlite3 que esta en el backend. si es posible lo comprimes y se lo envias a este correo comprimido  o al menos con la fecha actual y dejas igual el archivo en backend intacto. tal cual como esta. lo que quiero es acer respaldo. lo vas a pasar a este correo danielpaez.dell@gmail.com

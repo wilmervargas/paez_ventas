@@ -14,6 +14,11 @@ from .services import abrir_caja, anular_pago, cerrar_caja, registrar_pago
 class CuotaSerializer(serializers.ModelSerializer):
     vencida = serializers.BooleanField(read_only=True)
     estado_display = serializers.CharField(source="get_estado_display", read_only=True)
+    fecha_pago_real = serializers.SerializerMethodField()
+    metodo_pago = serializers.SerializerMethodField()
+    metodo_pago_display = serializers.SerializerMethodField()
+    banco_pago = serializers.SerializerMethodField()
+    referencia_pago = serializers.SerializerMethodField()
 
     class Meta:
         model = Cuota
@@ -26,7 +31,83 @@ class CuotaSerializer(serializers.ModelSerializer):
             "estado",
             "estado_display",
             "vencida",
+            "fecha_pago_real",
+            "metodo_pago",
+            "metodo_pago_display",
+            "banco_pago",
+            "referencia_pago",
         )
+
+    def _pagos_info(self, obj):
+        if hasattr(obj, "_pagos_info_cache"):
+            return obj._pagos_info_cache
+        apps = [a for a in getattr(obj, "aplicaciones").all() if getattr(a, "pago", None) and not a.pago.anulado]
+        if not apps:
+            obj._pagos_info_cache = []
+            return obj._pagos_info_cache
+        # Más reciente primero por fecha de pago/id del pago
+        apps.sort(key=lambda a: (a.pago.fecha_pago, a.pago_id), reverse=True)
+        info = []
+        seen = set()
+        for app in apps:
+            pago = app.pago
+            key = (pago.id, pago.fecha_pago, pago.metodo)
+            if key in seen:
+                continue
+            seen.add(key)
+            info.append(
+                {
+                    "fecha_pago": pago.fecha_pago,
+                    "metodo": pago.metodo,
+                    "metodo_display": pago.get_metodo_display(),
+                    "banco": (getattr(pago, "banco", "") or "").strip(),
+                    "referencia": (getattr(pago, "referencia", "") or "").strip(),
+                }
+            )
+        obj._pagos_info_cache = info
+        return info
+
+    def get_fecha_pago_real(self, obj):
+        info = self._pagos_info(obj)
+        return info[0]["fecha_pago"] if info else None
+
+    def get_metodo_pago(self, obj):
+        info = self._pagos_info(obj)
+        return info[0]["metodo"] if info else None
+
+    def get_metodo_pago_display(self, obj):
+        info = self._pagos_info(obj)
+        if not info:
+            return None
+        labels = [i["metodo_display"] for i in info]
+        # únicos conservando orden
+        out = []
+        for l in labels:
+            if l not in out:
+                out.append(l)
+        return ", ".join(out)
+
+    def get_banco_pago(self, obj):
+        info = self._pagos_info(obj)
+        if not info:
+            return None
+        valores = [i["banco"] for i in info if i.get("banco")]
+        out = []
+        for v in valores:
+            if v not in out:
+                out.append(v)
+        return ", ".join(out) if out else None
+
+    def get_referencia_pago(self, obj):
+        info = self._pagos_info(obj)
+        if not info:
+            return None
+        valores = [i["referencia"] for i in info if i.get("referencia")]
+        out = []
+        for v in valores:
+            if v not in out:
+                out.append(v)
+        return ", ".join(out) if out else None
 
 
 class PagoAplicacionSerializer(serializers.ModelSerializer):

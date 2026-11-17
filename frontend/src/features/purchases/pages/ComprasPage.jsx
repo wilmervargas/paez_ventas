@@ -21,7 +21,7 @@ import { AnularCompraModal } from "../components/AnularCompraModal";
 import { CompraDetailModal } from "../components/CompraDetailModal";
 import { CompraFormModal } from "../components/CompraFormModal";
 import { RecibirCompraModal } from "../components/RecibirCompraModal";
-import { useCompras } from "../hooks";
+import { useCompras, useTasaVigente } from "../hooks";
 const PAGE_SIZE = 25;
 const ESTADO_TONES = {
     borrador: "warning",
@@ -29,15 +29,33 @@ const ESTADO_TONES = {
     anulada: "neutral",
 };
 
-function tasaLabelCompra(compra) {
-    const esAjuste = compra.moneda === "VES" && Number(compra.tasa_cambio || "0") === 1;
-    if (esAjuste) return "Ajuste (Bs)";
+function TasaCompraLabel({ compra }) {
+    const tasa = formatRate(compra.tasa_cambio);
     const tasaDoc = Number(compra.tasa_cambio || 0);
     const tasaBcv = Number(compra.tasa_bcv ?? 0);
-    if (Number.isFinite(tasaBcv) && tasaBcv > 0 && Math.abs(tasaDoc - tasaBcv) < 0.000001) {
-        return `BCV USD · ${formatRate(compra.tasa_cambio)}`;
+    const coincideBcv =
+        compra.moneda === "VES" &&
+        Number.isFinite(tasaBcv) &&
+        tasaBcv > 0 &&
+        Math.abs(tasaDoc - tasaBcv) < 0.000001;
+    const necesitaInferir = compra.moneda === "VES" && !coincideBcv;
+    const tasaEur = useTasaVigente("VES", "EUR", necesitaInferir ? compra.fecha : "");
+    const tasaUsdt = useTasaVigente("VES", "USDT", necesitaInferir ? compra.fecha : "");
+
+    if (coincideBcv) return <>BCV USD · {tasa}</>;
+    if (compra.moneda === "VES") {
+        if (tasaEur.data?.tasa && Math.abs(tasaDoc - Number(tasaEur.data.tasa)) < 0.000001) {
+            return <>Euro BCV · {tasa}</>;
+        }
+        if (tasaUsdt.data?.tasa && Math.abs(tasaDoc - Number(tasaUsdt.data.tasa)) < 0.000001) {
+            return <>USDT · {tasa}</>;
+        }
+        if (necesitaInferir && (!tasaEur.isFetched || !tasaUsdt.isFetched)) {
+            return <>{tasa} · tasa doc.</>;
+        }
+        return <>Ajuste/Manual · {tasa}</>;
     }
-    return `${formatRate(compra.tasa_cambio)} · tasa doc.`;
+    return <>{tasa} · tasa doc.</>;
 }
 export function ComprasPage() {
     const { user } = useAuth();
@@ -160,7 +178,7 @@ export function ComprasPage() {
                       </td>
                       <td className="px-3 py-3 text-slate-600">
                         <p>{formatDate(compra.fecha)}</p>
-                        <p className="text-xs text-slate-500">{compra.moneda} · {tasaLabelCompra(compra)}</p>
+                        <p className="text-xs text-slate-500">{compra.moneda} · <TasaCompraLabel compra={compra} /></p>
                       </td>
                       <td className="px-3 py-3">
                         <p className="font-semibold text-slate-900">

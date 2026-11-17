@@ -90,7 +90,7 @@ class DeudaFilter(filters.FilterSet):
 class DeudaViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = (
         Deuda.objects.select_related("cliente", "pedido")
-        .prefetch_related("cuotas", "aplicaciones")
+        .prefetch_related("cuotas__aplicaciones__pago", "aplicaciones")
         .all()
     )
     serializer_class = DeudaSerializer

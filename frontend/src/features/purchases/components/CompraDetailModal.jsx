@@ -13,8 +13,6 @@ const TONES = {
 };
 
 function describeTasaCompra(compra, tasaEur, tasaUsdt) {
-    const esAjuste = compra.moneda === "VES" && Number(compra.tasa_cambio || "0") === 1;
-    if (esAjuste) return "Ajuste (Bs)";
     const tasaDoc = Number(compra.tasa_cambio || 0);
     const tasaBcv = Number(compra.tasa_bcv ?? 0);
     if (Number.isFinite(tasaBcv) && tasaBcv > 0 && Math.abs(tasaDoc - tasaBcv) < 0.000001) {
@@ -26,13 +24,17 @@ function describeTasaCompra(compra, tasaEur, tasaUsdt) {
     if (tasaUsdt && Math.abs(tasaDoc - Number(tasaUsdt)) < 0.000001) {
         return `${formatRate(compra.tasa_cambio)} (USDT, por 1 USDT)`;
     }
+    if (compra.moneda === "VES") {
+        return `${formatRate(compra.tasa_cambio)} (Ajuste/Manual, Bs)`;
+    }
     return `${formatRate(compra.tasa_cambio)} (tasa aplicada, Bs)`;
 }
 
 export function CompraDetailModal({ compra, onClose }) {
-    const esAjuste = compra.moneda === "VES" && Number(compra.tasa_cambio || "0") === 1;
-    const coincideBcv = !esAjuste && Number(compra.tasa_bcv ?? 0) > 0 && Math.abs(Number(compra.tasa_cambio || 0) - Number(compra.tasa_bcv)) < 0.000001;
-    const necesitaInferir = !esAjuste && !coincideBcv;
+    const tasaDoc = Number(compra.tasa_cambio || 0);
+    const tasaBcv = Number(compra.tasa_bcv ?? 0);
+    const coincideBcv = Number.isFinite(tasaBcv) && tasaBcv > 0 && Math.abs(tasaDoc - tasaBcv) < 0.000001;
+    const necesitaInferir = compra.moneda === "VES" && !coincideBcv;
     const tasaEurDoc = useTasaVigente("VES", "EUR", necesitaInferir ? compra.fecha : "");
     const tasaUsdtDoc = useTasaVigente("VES", "USDT", necesitaInferir ? compra.fecha : "");
     const tasaLabel = describeTasaCompra(compra, tasaEurDoc.data?.tasa, tasaUsdtDoc.data?.tasa);

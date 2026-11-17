@@ -1,5 +1,6 @@
 import {
   Ban,
+  Calculator,
   CheckCircle2,
   Eye,
   Pencil,
@@ -37,6 +38,7 @@ import { ConfirmarPedidoModal } from "../components/ConfirmarPedidoModal";
 import { EntregarPedidoModal } from "../components/EntregarPedidoModal";
 import { PedidoDetailModal } from "../components/PedidoDetailModal";
 import { PedidoFormModal } from "../components/PedidoFormModal";
+import { PlanCuotasModal } from "../components/PlanCuotasModal";
 import { usePedidos, usePrepararCobroContado, useTasaVigente } from "../hooks";
 
 const PAGE_SIZE = 25;
@@ -134,6 +136,7 @@ export function PedidosPage() {
   const [fechaHasta, setFechaHasta] = useState("");
   const [editing, setEditing] = useState(undefined);
   const [detail, setDetail] = useState(null);
+  const [planCuotasPedido, setPlanCuotasPedido] = useState(null);
   const [confirmando, setConfirmando] = useState(null);
   const [entregando, setEntregando] = useState(null);
   const [anulando, setAnulando] = useState(null);
@@ -336,6 +339,16 @@ export function PedidosPage() {
                               icon={<Pencil className="h-4 w-4" />}
                             />
                           ) : null}
+                          {puedeGestionar && pedido.puede_editar && pedido.tipo_pago === "credito" ? (
+                            <Button
+                              variant="ghost"
+                              className="p-2 text-sky-600 hover:bg-sky-50"
+                              onClick={() => setPlanCuotasPedido(pedido)}
+                              title="Plan de cuotas"
+                              aria-label={`Plan de cuotas de ${pedido.numero}`}
+                              icon={<Calculator className="h-4 w-4" />}
+                            />
+                          ) : null}
                           {puedeConfirmar && pedido.puede_confirmar ? (
                             <Button
                               variant="ghost"
@@ -425,6 +438,13 @@ export function PedidosPage() {
       ) : null}
 
       {detail ? <PedidoDetailModal pedido={detail} onClose={() => setDetail(null)} /> : null}
+
+      {planCuotasPedido ? (
+        <PlanCuotasModal
+          pedido={planCuotasPedido}
+          onClose={() => setPlanCuotasPedido(null)}
+        />
+      ) : null}
 
       {cobroContadoDeuda ? (
         <RegistrarPagoModal

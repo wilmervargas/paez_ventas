@@ -177,6 +177,11 @@ LOGGING = {
 WHATSAPP_WS_URL = os.getenv("WHATSAPP_WS_URL", "http://127.0.0.1:3000").rstrip("/")
 WHATSAPP_TIMEOUT = int(os.getenv("WHATSAPP_TIMEOUT", "20"))
 
+# Respaldos de base de datos (manage.py backup_database).
+BACKUP_DIR = Path(os.getenv("BACKUP_DIR", str(BASE_DIR / "backups")))
+BACKUP_RETENTION_DAYS = int(os.getenv("BACKUP_RETENTION_DAYS", "30"))
+BACKUP_EMAIL_TO = os.getenv("BACKUP_EMAIL_TO", "daniel.paez.dell@gmail.com")
+
 # Correo (recuperación de contraseña, respaldos).
 _default_email_backend = (
     "django.core.mail.backends.console.EmailBackend"

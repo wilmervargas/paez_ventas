@@ -51,7 +51,7 @@ def crear_plan_cuotas(
     user=None,
     plan=None,
 ) -> list[Cuota]:
-    """Crea el plan de cuotas para una deuda (1..8). Idempotente si ya existen.
+    """Crea el plan de cuotas para una deuda (1..10). Idempotente si ya existen.
 
     Si `plan` se indica, se usa como fuente (lista de {numero, fecha_vencimiento, monto})
     y se ajusta automáticamente para cuadrar con `deuda.monto_original`.
@@ -71,8 +71,8 @@ def crear_plan_cuotas(
             n = int(numero_cuotas)
         except (TypeError, ValueError):
             n = 1
-    if n < 1 or n > 8:
-        raise BusinessRuleError("El número de cuotas debe estar entre 1 y 8.")
+    if n < 1 or n > 10:
+        raise BusinessRuleError("El número de cuotas debe estar entre 1 y 10.")
 
     montos = []
     fechas = []
@@ -95,6 +95,10 @@ def crear_plan_cuotas(
             except Exception as exc:
                 raise BusinessRuleError("La fecha de vencimiento de una cuota no es válida.") from exc
         fechas.append(venc)
+
+    montos_explicitos = [m for m in montos if m is not None]
+    if montos_explicitos and total > 0 and sum(montos_explicitos, Decimal("0.00")) <= Decimal("0.00"):
+        montos = [None] * n
 
     base_monto = (to_decimal(total) / Decimal(n)).quantize(TWO, rounding=ROUND_HALF_UP)
     calculados = []

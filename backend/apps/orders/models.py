@@ -122,7 +122,7 @@ class Pedido(BaseModel):
         ]
         constraints = [
             models.CheckConstraint(
-                condition=models.Q(numero_cuotas__gte=1) & models.Q(numero_cuotas__lte=8),
+                condition=models.Q(numero_cuotas__gte=1) & models.Q(numero_cuotas__lte=10),
                 name="pedido_numero_cuotas_rango",
             ),
         ]
@@ -150,8 +150,8 @@ class Pedido(BaseModel):
             valor = getattr(self, campo)
             if valor is not None and valor < 0:
                 errors[campo] = "El monto no puede ser negativo."
-        if self.numero_cuotas is not None and (self.numero_cuotas < 1 or self.numero_cuotas > 8):
-            errors["numero_cuotas"] = "El número de cuotas debe estar entre 1 y 8."
+        if self.numero_cuotas is not None and (self.numero_cuotas < 1 or self.numero_cuotas > 10):
+            errors["numero_cuotas"] = "El número de cuotas debe estar entre 1 y 10."
         if self.tipo_pago == self.TipoPago.CONTADO and self.numero_cuotas != 1:
             errors["numero_cuotas"] = "Los pedidos de contado deben tener 1 cuota."
         if errors:

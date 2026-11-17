@@ -144,7 +144,7 @@ class PedidoSerializer(serializers.ModelSerializer):
     tipo_pago = serializers.ChoiceField(
         choices=Pedido.TipoPago.choices, required=False, default=Pedido.TipoPago.CONTADO
     )
-    numero_cuotas = serializers.IntegerField(required=False, min_value=1, max_value=8, default=1)
+    numero_cuotas = serializers.IntegerField(required=False, min_value=1, max_value=10, default=1)
     fecha_primera_cuota = serializers.DateField(required=False, allow_null=True)
     plan_cuotas = serializers.JSONField(required=False)
 
@@ -334,7 +334,7 @@ class PedidoSerializer(serializers.ModelSerializer):
 class ConfirmarPedidoSerializer(serializers.Serializer):
     """Datos opcionales para confirmación."""
 
-    numero_cuotas = serializers.IntegerField(required=False, min_value=1, max_value=8)
+    numero_cuotas = serializers.IntegerField(required=False, min_value=1, max_value=10)
     fecha_vencimiento = serializers.DateField(required=False, allow_null=True)
     fecha_primera_cuota = serializers.DateField(required=False, allow_null=True)
     plan_cuotas = serializers.JSONField(required=False)

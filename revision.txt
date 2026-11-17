@@ -1,0 +1,2 @@
+5. MODULO DE DEUDAS Y CROBROS: Cuando vaya a registrar el pago, Despliega los datos de la cuota que se va a cncelar.
+1. MODULO DE DEUDAS Y CROBROS: Cuando vaya a enviar cobro por ws, debe cambiar la tasa al valor del dia.

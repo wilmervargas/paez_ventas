@@ -13,6 +13,7 @@ import {
   getTasaVigente,
   listPedidos,
   prepararCobroContadoPedido,
+  patchPedido,
   updatePedido,
 } from "./api";
 
@@ -35,6 +36,16 @@ export function useSavePedido() {
   return useMutation({
     mutationFn: (args) =>
       args.id ? updatePedido(args.id, args.payload) : createPedido(args.payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ordersKeys.all });
+    },
+  });
+}
+
+export function usePatchPedido() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, payload }) => patchPedido(id, payload),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ordersKeys.all });
     },

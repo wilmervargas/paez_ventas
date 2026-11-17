@@ -124,7 +124,7 @@ class Cuota(BaseModel):
     )
     numero = models.PositiveSmallIntegerField(
         "número de cuota",
-        validators=[MinValueValidator(1), MaxValueValidator(8)],
+        validators=[MinValueValidator(1), MaxValueValidator(10)],
     )
     monto = models.DecimalField("monto", max_digits=14, decimal_places=2)
     saldo = models.DecimalField("saldo", max_digits=14, decimal_places=2)
@@ -144,7 +144,7 @@ class Cuota(BaseModel):
         constraints = [
             models.UniqueConstraint(fields=("deuda", "numero"), name="cuota_deuda_numero_uniq"),
             models.CheckConstraint(
-                condition=Q(numero__gte=1, numero__lte=8), name="cuota_numero_1_8"
+                condition=Q(numero__gte=1, numero__lte=10), name="cuota_numero_1_8"
             ),
             models.CheckConstraint(condition=Q(monto__gte=0), name="cuota_monto_no_negativo"),
             models.CheckConstraint(condition=Q(saldo__gte=0), name="cuota_saldo_no_negativo"),

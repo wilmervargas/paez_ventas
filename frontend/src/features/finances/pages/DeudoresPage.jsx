@@ -12,11 +12,12 @@ import { Pagination } from "../../../components/ui/Pagination";
 import { useAuth } from "../../../context/auth-context";
 import { formatDate } from "../../../lib/dates";
 import { getErrorMessage } from "../../../lib/errors";
-import { formatMoney } from "../../../lib/money";
+import { formatMoney, formatRate } from "../../../lib/money";
 import { canManagePayments } from "../../../lib/roles";
 import { MensajePruebaModal } from "../../whatsapp/components/MensajePruebaModal";
 import { DeudaDetailModal } from "../components/DeudaDetailModal";
 import { RegistrarPagoModal } from "../components/RegistrarPagoModal";
+import { useTasaVigente } from "../../orders/hooks";
 import { useDeudoresPendientes } from "../hooks";
 
 const PAGE_SIZE = 25;
@@ -61,11 +62,20 @@ function buildMensajeCobro(deuda) {
       const numero = c.numero ?? index + 1;
       const pagada = c.estado === "pagada" || Number(c.saldo || 0) <= 0;
       const esActualPorPagar = !pagada && (actualId != null ? c.id === actualId : c === proxima);
-      const fmt = (text) => (esActualPorPagar ? `*_ ${text} _*` : text);
+      const fmt = (text) => (esActualPorPagar ? `*_${text}_*` : text);
+      const fechaTentativa = c.fecha_vencimiento ? formatDate(c.fecha_vencimiento) : "—";
+      const fechaReal = c.fecha_pago_real ? formatDate(c.fecha_pago_real) : "—";
+      const metodo = c.metodo_pago_display || "—";
+      const banco = c.banco_pago || "—";
+      const referencia = c.referencia_pago || "—";
 
       lines.push("");
       lines.push(fmt(`Cuota ${numero}:`));
-      lines.push(fmt(`Fecha de pago: ${formatDate(c.fecha_vencimiento)}`));
+      lines.push(fmt(`Fecha tentativa de pago: ${fechaTentativa}`));
+      lines.push(fmt(`Fecha real de pago: ${fechaReal}`));
+      lines.push(fmt(`Método de pago: ${metodo}`));
+      lines.push(fmt(`Banco: ${banco}`));
+      lines.push(fmt(`Referencia: ${referencia}`));
       lines.push(fmt(`Monto: ${formatMoney(c.monto, deuda.moneda)}`));
       lines.push(fmt(`Estatus: ${pagada ? "Pagada" : "Pendiente"}`));
     });
@@ -105,22 +115,146 @@ function tienePagoPendiente(deuda) {
   return vence <= hoyLocal;
 }
 
+function useTipoTasaDeuda(deuda) {
+  const tasaDoc = Number(deuda.tasa_cambio || 0);
+  const tasaBcv = Number(deuda.tasa_bcv ?? 0);
+  const coincideBcv =
+    deuda.moneda === "VES" &&
+    Number.isFinite(tasaBcv) &&
+    tasaBcv > 0 &&
+    Math.abs(tasaDoc - tasaBcv) < 0.000001;
+  const necesitaInferir = deuda.moneda === "VES" && !coincideBcv;
+  const tasaEur = useTasaVigente("VES", "EUR", necesitaInferir ? deuda.pedido_fecha : "");
+  const tasaUsdt = useTasaVigente("VES", "USDT", necesitaInferir ? deuda.pedido_fecha : "");
+
+  if (coincideBcv) return { tipo: "usd_bcv", listo: true };
+  if (deuda.moneda === "VES") {
+    if (tasaEur.data?.tasa && Math.abs(tasaDoc - Number(tasaEur.data.tasa)) < 0.000001) {
+      return { tipo: "eur_bcv", listo: true };
+    }
+    if (tasaUsdt.data?.tasa && Math.abs(tasaDoc - Number(tasaUsdt.data.tasa)) < 0.000001) {
+      return { tipo: "usdt", listo: true };
+    }
+    if (necesitaInferir && (!tasaEur.isFetched || !tasaUsdt.isFetched)) {
+      return { tipo: "pendiente", listo: false };
+    }
+    return { tipo: "otro", listo: true };
+  }
+  if (deuda.moneda === "USD") return { tipo: "usd_bcv", listo: true };
+  if (deuda.moneda === "EUR") return { tipo: "eur_bcv", listo: true };
+  if (deuda.moneda === "USDT") return { tipo: "usdt", listo: true };
+  return { tipo: "otro", listo: true };
+}
+
+function TasaPedidoDeuda({ deuda }) {
+  const info = useTipoTasaDeuda(deuda);
+  const tasa = formatRate(deuda.tasa_cambio);
+  let tipo = "Otro";
+  if (info.tipo === "usd_bcv") tipo = "Dólar";
+  else if (info.tipo === "eur_bcv") tipo = "Euro";
+  else if (info.tipo === "usdt") tipo = "USDT";
+  else if (info.tipo === "pendiente") tipo = "Tasa";
+  else tipo = "Otro";
+  return (
+    <div>
+      <p className="font-medium text-slate-700">{tipo}</p>
+      <p className="text-xs text-slate-500">{tasa}</p>
+    </div>
+  );
+}
+
+function formatNumEs(value, decimals = 2) {
+  return Number(value || 0).toLocaleString("es-VE", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+}
+
+function montoUsdCuota(deuda, cuotaMonto) {
+  const monto = Number(cuotaMonto || 0);
+  const tasa = Number(deuda?.tasa_cambio || 0);
+  const tasaBcv = Number(deuda?.tasa_bcv || 0);
+  if (deuda?.moneda === "USD") return `$ ${formatNumEs(monto)}`;
+  if (deuda?.moneda === "VES" && tasa > 0) {
+    const esUsdBcv = tasaBcv > 0 && Math.abs(tasa - tasaBcv) < 0.000001;
+    if (esUsdBcv || Number(deuda?.tasa_bcv) > 0) {
+      return `$ ${formatNumEs(monto / tasa)}`;
+    }
+    return `$ ${formatNumEs(monto / tasa)}`;
+  }
+  if ((deuda?.moneda === "EUR" || deuda?.moneda === "USDT") && tasa > 0) return "—";
+  if (tasa > 0) return `$ ${formatNumEs(monto / tasa)}`;
+  return "—";
+}
+
+function MontoUsdOTasaAjustada({ deuda }) {
+  const info = useTipoTasaDeuda(deuda);
+  const tasaNum = Number(deuda.tasa_cambio || 0);
+  const saldoNum = Number(deuda.saldo || 0);
+  const saldoBaseNum = Number(deuda.monto_original || 0);
+
+  const formatUsd = (value) => `$ ${formatNumEs(value)}`;
+
+  if (deuda.moneda === "USD") {
+    return (
+      <div>
+        <p className="font-medium text-slate-700">{formatUsd(saldoNum)}</p>
+        <p className="text-xs text-slate-500">de {formatUsd(saldoBaseNum)}</p>
+      </div>
+    );
+  }
+
+  if (info.tipo === "usd_bcv" && tasaNum > 0) {
+    return (
+      <div>
+        <p className="font-medium text-slate-700">{formatUsd(saldoNum / tasaNum)}</p>
+        <p className="text-xs text-slate-500">de {formatUsd(saldoBaseNum / tasaNum)}</p>
+      </div>
+    );
+  }
+
+  if (info.tipo === "otro") {
+    return (
+      <div>
+        <p className="font-medium text-slate-700">Tasa ajustada</p>
+        <p className="text-xs text-slate-500">{formatRate(deuda.tasa_cambio)}</p>
+      </div>
+    );
+  }
+
+  if (info.tipo === "eur_bcv" && tasaNum > 0) {
+    const eq = Number(saldoNum / tasaNum).toLocaleString("es-VE", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    return (
+      <div>
+        <p className="font-medium text-slate-700">€ {eq}</p>
+        <p className="text-xs text-slate-500">Equivalente (EUR)</p>
+      </div>
+    );
+  }
+
+  if (info.tipo === "usdt" && tasaNum > 0) {
+    const eq = Number(saldoNum / tasaNum).toLocaleString("es-VE", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    return (
+      <div>
+        <p className="font-medium text-slate-700">{eq} USDT</p>
+        <p className="text-xs text-slate-500">Equivalente (USDT)</p>
+      </div>
+    );
+  }
+
+  return <span className="text-slate-400">—</span>;
+}
+
 function DeudaRow({ deuda, puedeCobrar, onDetail, onMensaje, onPago }) {
   const cuotas = deuda.cuotas ?? [];
   const prox = deuda.proxima_cuota;
-  const defaultCuotaId = prox?.id ?? cuotas.find((c) => Number(c.saldo || 0) > 0)?.id ?? cuotas[0]?.id;
-  const [selectedCuotaId, setSelectedCuotaId] = useState("");
   const pagoPendiente = tienePagoPendiente(deuda);
-
-  const selectedId =
-    selectedCuotaId && cuotas.some((c) => String(c.id) === String(selectedCuotaId))
-      ? String(selectedCuotaId)
-      : defaultCuotaId
-        ? String(defaultCuotaId)
-        : "";
-
-  const selected =
-    cuotas.find((c) => String(c.id) === selectedId) || prox || cuotas[0] || null;
 
   return (
     <tr
@@ -147,58 +281,35 @@ function DeudaRow({ deuda, puedeCobrar, onDetail, onMensaje, onPago }) {
         <p className="text-xs text-slate-500">{formatDate(deuda.pedido_fecha)}</p>
       </td>
       <td className="px-3 py-3">
+        <TasaPedidoDeuda deuda={deuda} />
+      </td>
+      <td className="px-3 py-3">
+        <MontoUsdOTasaAjustada deuda={deuda} />
+      </td>
+      <td className="px-3 py-3">
         <p className="font-semibold text-slate-900">{formatMoney(deuda.saldo, deuda.moneda)}</p>
         <p className="text-xs text-slate-500">de {formatMoney(deuda.monto_original, deuda.moneda)}</p>
         {deuda.vencida ? <Badge tone="danger">Vencida</Badge> : <Badge tone="warning">Pendiente</Badge>}
       </td>
-      <td className="px-3 py-3 min-w-[320px]">
+      <td className="px-3 py-3 min-w-[260px]">
         <p className="text-xs text-slate-600">
           {deuda.cuotas_pagadas}/{deuda.cuotas_total} pagadas · {deuda.cuotas_pendientes} pendientes
           {deuda.cuotas_vencidas ? ` · ${deuda.cuotas_vencidas} vencidas` : ""}
         </p>
-        {cuotas.length > 0 ? (
-          <div className="mt-2 space-y-1">
-            <select
-              className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-              value={selectedId}
-              onChange={(e) => setSelectedCuotaId(e.target.value)}
-              aria-label={`Cuotas de ${deuda.cliente_nombre}`}
-            >
-              {cuotas.map((c) => {
-                const label = cuotaEstadoLabel(c, prox);
-                const marca = c.id === prox?.id ? "★ " : "";
-                return (
-                  <option key={c.id} value={c.id}>
-                    {marca}Cuota {c.numero} · {formatMoney(c.saldo > 0 ? c.saldo : c.monto, deuda.moneda)} · vence {formatDate(c.fecha_vencimiento)} · {label}
-                  </option>
-                );
-              })}
-            </select>
-            {selected ? (
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span className="font-medium text-slate-700">
-                  Cuota {selected.numero}: {formatMoney(selected.saldo > 0 ? selected.saldo : selected.monto, deuda.moneda)}
-                </span>
-                <span className="text-slate-500">Vence {formatDate(selected.fecha_vencimiento)}</span>
-                <Badge
-                  tone={
-                    selected.estado === "pagada" || Number(selected.saldo || 0) <= 0
-                      ? "success"
-                      : selected.id === prox?.id
-                        ? "info"
-                        : selected.vencida
-                          ? "danger"
-                          : "warning"
-                  }
-                >
-                  {cuotaEstadoLabel(selected, prox)}
-                </Badge>
-              </div>
-            ) : null}
-            <p className="text-[11px] text-slate-500">
-              ★ Por defecto: cuota actual a pagar. El cobro se aplica a la deuda (cuota más antigua pendiente).
+        {prox && Number(prox.saldo || 0) > 0 ? (
+          <div className="mt-2 space-y-0.5 text-xs">
+            <p className="font-bold italic text-slate-800">
+              Próxima cuota #{prox.numero}: {formatMoney(prox.saldo, deuda.moneda)}
+              {" · "}
+              {montoUsdCuota(deuda, prox.saldo)}
             </p>
+            <p className="text-slate-600">
+              Fecha de cobro: <span className="font-medium">{formatDate(prox.fecha_vencimiento)}</span>
+            </p>
+            <Badge tone={prox.vencida ? "danger" : "info"}>{cuotaEstadoLabel(prox, prox)}</Badge>
           </div>
+        ) : cuotas.length > 0 ? (
+          <p className="mt-2 text-xs text-slate-500">Sin cuotas pendientes.</p>
         ) : (
           <span className="text-xs text-slate-400">Sin cuotas</span>
         )}
@@ -246,7 +357,7 @@ export function DeudoresPage() {
     page,
     page_size: PAGE_SIZE,
     search: deferredSearch.trim() || undefined,
-    ordering: "fecha_vencimiento",
+    ordering: "fecha_vencimiento,fecha_emision,id",
     ...(soloPagoPendiente ? { pago_pendiente: "true" } : {}),
     ...(filtroSemanal ? { semanal: filtroSemanal } : {}),
   });
@@ -310,12 +421,14 @@ export function DeudoresPage() {
         ) : data && data.results.length > 0 ? (
           <>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[980px] text-left text-sm">
+              <table className="w-full min-w-[1240px] text-left text-sm">
                 <caption className="sr-only">Listado de deudores pendientes</caption>
                 <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                   <tr>
                     <th className="px-3 py-3 font-semibold">Cliente</th>
                     <th className="px-3 py-3 font-semibold">Pedido</th>
+                    <th className="px-3 py-3 font-semibold">Tasa del pedido</th>
+                    <th className="px-3 py-3 font-semibold">USD / Tasa ajustada</th>
                     <th className="px-3 py-3 font-semibold">Saldo</th>
                     <th className="px-3 py-3 font-semibold">Cuotas</th>
                     <th className="px-3 py-3 text-right font-semibold">Acciones</th>
