@@ -260,7 +260,11 @@ MovimientoInventario
   tipo             entrada | salida | ajuste | venta | compra | devolucion | anulacion
   direccion        entrada | salida  # define el signo; obligatoria en ajustes
   cantidad         Decimal(14,3)  # siempre positiva
-  costo_unitario   Decimal(14,4)
+  costo_unitario   Decimal(14,4)  # en `moneda` (divisa de la compra)
+  moneda           USD | EUR | USDT | VES  # divisa del costo
+  tasa_cambio      Decimal(18,6)  # Bs por 1 unidad de `moneda`
+  costo_unitario_bs   Decimal(14,4)  # equivalente en bolívares
+  costo_unitario_base Decimal(14,4)  # moneda base: costo promedio y reportes
   motivo
   referencia_tipo / referencia_id   # pedido, compra, devolución
   created_by, created_at
@@ -284,6 +288,7 @@ Compra
   proveedor        FK
   fecha
   moneda, tasa_cambio
+  divisa           USD | EUR | USDT | VES  # divisa convertible de los costos
   subtotal, iva, total
   total_base       Decimal(14,2)  # convertido a moneda_base
   estado           borrador | recibida | anulada
@@ -294,6 +299,9 @@ CompraDetalle
 ```
 
 - Al pasar a `recibida`, genera `MovimientoInventario` de tipo `compra` y actualiza stock/costo.
+  El movimiento guarda el costo unitario en la **divisa de la compra** (`divisa`),
+  su equivalente en bolívares (`costo_unitario_bs`) y en moneda base
+  (`costo_unitario_base`); el costo promedio del producto se calcula en moneda base.
 - Anular una compra recibida exige reverso de stock atómico.
 - **Fecha y tasa quedan congeladas en el documento.** Si el payload no trae
   `tasa_cambio`, el backend resuelve la del histórico para la **fecha de la
@@ -345,6 +353,8 @@ Deuda
   moneda, tasa_cambio
   monto_original   Decimal(14,2)
   saldo            Decimal(14,2)   # CheckConstraint >= 0
+  saldo_bs         Decimal(14,2)   # saldo en bolívares (se mantiene al cobrar/anular)
+  saldo_base       Decimal(14,2)   # saldo en la divisa de la tasa (USD/EUR/USDT)
   fecha_emision, fecha_vencimiento
   estado           pendiente | pagada | anulada
   # "vencida" NO se guarda: se deriva por fecha + saldo
@@ -390,7 +400,7 @@ Reglas:
 - Un sobrante sin aplicar queda como **saldo a favor/anticipo** del cliente.
 - Pago y aplicaciones son inmutables: corregir = anular y crear uno nuevo.
 - No se puede anular una deuda con pagos aplicados.
-- Caja: no se puede registrar un pago en efectivo sin caja abierta.
+- Caja: un pago en efectivo se asocia a la caja abierta del usuario si existe; sin caja abierta se registra igual, sin movimiento de caja (fuera del arqueo).
 
 ### 5.8 common
 

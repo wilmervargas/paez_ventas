@@ -100,6 +100,162 @@ def test_recibir_compra_actualiza_stock_y_costo_promedio(
     assert movimiento.cantidad == Decimal("10.000")
     assert movimiento.referencia_tipo == "compra"
     assert movimiento.referencia_id == creada.data["id"]
+    # Compra en USD (moneda base): el costo del kardex queda en USD.
+    assert movimiento.moneda == "USD"
+    assert movimiento.costo_unitario == Decimal("12.5000")
+    assert movimiento.costo_unitario_base == Decimal("12.5000")
+
+
+def _tasa_ves(moneda_base, tasa, fecha, hora=9):
+    return TasaCambio.objects.create(
+        moneda="VES",
+        moneda_base=moneda_base,
+        tasa=Decimal(tasa),
+        fuente="bcv",
+        vigente_desde=timezone.make_aware(datetime.combine(fecha, time(hora, 0))),
+    )
+
+
+def test_kardex_guarda_costo_en_divisa_y_bolivares(admin_client, empresa, proveedor, producto):
+    """El kardex muestra el costo en la divisa comprada, no en bolívares."""
+    hoy = timezone.localdate()
+    _tasa_ves("USD", "40.000000", hoy)
+
+    creada = admin_client.post(
+        reverse("compra-list"),
+        _payload(
+            proveedor,
+            producto,
+            moneda="VES",
+            divisa="USD",
+            tasa_cambio="50.000000",
+            detalles=[
+                {
+                    "producto": producto.pk,
+                    "cantidad": "10.000",
+                    "costo_unitario": "625.0000",
+                }
+            ],
+        ),
+        format="json",
+    )
+    assert creada.status_code == 201
+    admin_client.post(reverse("compra-recibir", args=[creada.data["id"]]), format="json")
+
+    movimiento = producto.movimientos.get(tipo=MovimientoInventario.Tipo.COMPRA)
+    assert movimiento.moneda == "USD"
+    assert movimiento.costo_unitario == Decimal("12.5000")  # 625 Bs / 50
+    assert movimiento.costo_unitario_bs == Decimal("625.0000")
+    assert movimiento.costo_unitario_base == Decimal("12.5000")
+    assert movimiento.tasa_cambio == Decimal("50.000000")
+
+    producto.refresh_from_db()
+    assert producto.costo == Decimal("12.50")
+
+
+def test_kardex_cruza_euros_a_moneda_base(admin_client, empresa, proveedor, producto):
+    """Una compra en euros guarda el costo en EUR y su equivalente en USD."""
+    hoy = timezone.localdate()
+    _tasa_ves("USD", "40.000000", hoy)
+    _tasa_ves("EUR", "44.000000", hoy, hora=10)
+
+    creada = admin_client.post(
+        reverse("compra-list"),
+        _payload(
+            proveedor,
+            producto,
+            moneda="VES",
+            divisa="EUR",
+            tasa_cambio="44.000000",
+            detalles=[
+                {
+                    "producto": producto.pk,
+                    "cantidad": "1.000",
+                    "costo_unitario": "440.0000",
+                }
+            ],
+        ),
+        format="json",
+    )
+    assert creada.status_code == 201
+    admin_client.post(reverse("compra-recibir", args=[creada.data["id"]]), format="json")
+
+    movimiento = producto.movimientos.get(tipo=MovimientoInventario.Tipo.COMPRA)
+    assert movimiento.moneda == "EUR"
+    assert movimiento.costo_unitario == Decimal("10.0000")
+    assert movimiento.costo_unitario_bs == Decimal("440.0000")
+    # 440 Bs / 40 Bs por USD = 11 USD
+    assert movimiento.costo_unitario_base == Decimal("11.0000")
+
+    producto.refresh_from_db()
+    assert producto.costo == Decimal("11.00")
+
+
+def test_kardex_admite_usdt_como_divisa(admin_client, empresa, proveedor, producto):
+    """USDT tiene 4 letras: la divisa del kardex no se trunca."""
+    hoy = timezone.localdate()
+    _tasa_ves("USD", "40.000000", hoy)
+    _tasa_ves("USDT", "42.000000", hoy, hora=11)
+
+    creada = admin_client.post(
+        reverse("compra-list"),
+        _payload(
+            proveedor,
+            producto,
+            moneda="VES",
+            divisa="USDT",
+            tasa_cambio="42.000000",
+            detalles=[
+                {
+                    "producto": producto.pk,
+                    "cantidad": "1.000",
+                    "costo_unitario": "420.0000",
+                }
+            ],
+        ),
+        format="json",
+    )
+    assert creada.status_code == 201
+    assert creada.data["divisa"] == "USDT"
+    admin_client.post(reverse("compra-recibir", args=[creada.data["id"]]), format="json")
+
+    movimiento = producto.movimientos.get(tipo=MovimientoInventario.Tipo.COMPRA)
+    assert movimiento.moneda == "USDT"
+    assert movimiento.costo_unitario == Decimal("10.0000")
+    assert movimiento.costo_unitario_bs == Decimal("420.0000")
+    assert movimiento.costo_unitario_base == Decimal("10.5000")  # 420 / 40
+
+
+def test_kardex_compra_en_bolivares_conserva_bolivares(admin_client, empresa, proveedor, producto):
+    hoy = timezone.localdate()
+    _tasa_ves("USD", "40.000000", hoy)
+
+    creada = admin_client.post(
+        reverse("compra-list"),
+        _payload(
+            proveedor,
+            producto,
+            moneda="VES",
+            divisa="VES",
+            tasa_cambio="1.000000",
+            detalles=[
+                {
+                    "producto": producto.pk,
+                    "cantidad": "2.000",
+                    "costo_unitario": "400.0000",
+                }
+            ],
+        ),
+        format="json",
+    )
+    assert creada.status_code == 201
+    admin_client.post(reverse("compra-recibir", args=[creada.data["id"]]), format="json")
+
+    movimiento = producto.movimientos.get(tipo=MovimientoInventario.Tipo.COMPRA)
+    assert movimiento.moneda == "VES"
+    assert movimiento.costo_unitario == Decimal("400.0000")
+    assert movimiento.costo_unitario_bs == Decimal("400.0000")
+    assert movimiento.costo_unitario_base == Decimal("10.0000")  # 400 / 40
 
 
 def test_compra_recibida_no_se_edita(admin_client, empresa, proveedor, producto):

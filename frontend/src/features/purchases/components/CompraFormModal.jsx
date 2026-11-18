@@ -11,35 +11,55 @@ import { Select } from "../../../components/ui/Select";
 import { TextArea } from "../../../components/ui/TextArea";
 import { useCompany } from "../../../context/company-context";
 import { formatDate } from "../../../lib/dates";
-import { addDecimals, divideDecimals, multiplyDecimals, percentOf, toApiDecimal, toDisplayDecimal } from "../../../lib/decimal";
+import { addDecimals, divideDecimals, formatEsVeInput, multiplyDecimals, percentOf, toApiDecimal } from "../../../lib/decimal";
 import { getErrorMessage } from "../../../lib/errors";
 import { formatMoney, formatRate } from "../../../lib/money";
 import { formatQuantity } from "../../../lib/numbers";
 import { useSaveCompra, useTasaVigente } from "../hooks";
 
-const MODO_LABEL = { usd_bcv: "Dólar BCV", eur_bcv: "Euro BCV", usdt: "USDT", ajuste: "Ajuste (Bs)" };
+const MODO_LABEL = { usd_bcv: "Dólar BCV", eur_bcv: "Euro BCV", usdt: "USDT", aju: "Ajustada (AJU)", ajuste: "Ajuste (Bs)" };
 const rateOptions = { shouldDirty: false, shouldValidate: true };
 
-const monto = z.string().trim().regex(/^\d{1,12}([.,]\d{1,4})?$/, "Usa un costo con hasta 4 decimales");
-const monto2 = z.string().trim().regex(/^\d{1,12}([.,]\d{1,2})?$/, "Usa un monto con hasta 2 decimales");
-const cantidad = z
-  .string()
-  .trim()
-  .regex(/^\d{1,11}([.,]\d{1,3})?$/, "Usa una cantidad con hasta 3 decimales")
-  .refine((value) => !/^0+(?:[.,]0+)?$/.test(value), "La cantidad debe ser mayor que cero");
+// Valida números escritos en formato es-VE (1.234,56) o API (1234.56).
+function esDecimalValido(value, maxDecimals) {
+  const raw = String(value ?? "").trim();
+  if (!raw || !/^[\d.,]+$/.test(raw)) return false;
+  const api = toApiDecimal(raw);
+  if (!api) return false;
+  const [integer, fraction = ""] = api.split(".");
+  return integer.length <= 12 && fraction.length <= maxDecimals;
+}
+function decimalField(maxDecimals, message) {
+  return z.string().trim().superRefine((value, ctx) => {
+    if (!esDecimalValido(value, maxDecimals)) {
+      ctx.addIssue({ code: "custom", message });
+    }
+  });
+}
+const monto = decimalField(4, "Usa un costo con hasta 4 decimales");
+const monto2 = decimalField(2, "Usa un monto con hasta 2 decimales");
+const cantidad = decimalField(3, "Usa una cantidad con hasta 3 decimales").refine(
+  (value) => Number(toApiDecimal(value)) > 0,
+  "La cantidad debe ser mayor que cero",
+);
 const tasa = z
   .string()
   .trim()
   .min(1, "Indica la tasa")
-  .regex(/^\d{1,12}([.,]\d{1,6})?$/, "Usa una tasa con hasta 6 decimales")
-  .refine((value) => Number(String(value).replace(",", ".")) > 0, "La tasa debe ser mayor que cero");
+  .superRefine((value, ctx) => {
+    if (!esDecimalValido(value, 6)) {
+      ctx.addIssue({ code: "custom", message: "Usa una tasa con hasta 6 decimales" });
+    } else if (!(Number(toApiDecimal(value)) > 0)) {
+      ctx.addIssue({ code: "custom", message: "La tasa debe ser mayor que cero" });
+    }
+  });
 
 const schema = z
   .object({
     proveedor: z.string().min(1, "Selecciona un proveedor"),
     fecha: z.string().min(1, "Indica la fecha"),
     numero_referencia: z.string().max(50),
-    modo_tasa: z.enum(["usd_bcv", "eur_bcv", "usdt", "ajuste"]),
+    modo_tasa: z.enum(["usd_bcv", "eur_bcv", "usdt", "aju", "ajuste"]),
     tasa_monto: tasa,
     otros_montos: monto2,
     notas: z.string(),
@@ -66,25 +86,26 @@ function baseDivisa(modo) {
   if (modo === "usd_bcv") return "USD";
   if (modo === "eur_bcv") return "EUR";
   if (modo === "usdt") return "USDT";
+  if (modo === "aju") return "AJU";
   return "USD";
 }
 function parseRate(value) {
-  const n = Number(String(value ?? "").replace(",", "."));
+  const n = Number(toApiDecimal(String(value ?? "")));
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 function formatRateInput(value) {
   const n = parseRate(value);
-  return n > 0 ? toDisplayDecimal(String(n), 2) : "";
+  return n > 0 ? formatEsVeInput(toApiDecimal(String(n), 2), 2) : "";
 }
 function bsToDivisa(bs, tasa, decimals = 2) {
   const t = Number(tasa || 0);
-  if (!Number.isFinite(t) || t <= 0) return toDisplayDecimal("0", decimals);
-  return divideDecimals(bs ?? "0", String(t), decimals);
+  if (!Number.isFinite(t) || t <= 0) return "0,00";
+  return formatEsVeInput(divideDecimals(bs ?? "0", String(t), decimals), 2);
 }
 function divisaToBs(value, tasa, decimals = 2) {
   const t = Number(tasa || 0);
-  if (!Number.isFinite(t) || t <= 0) return toDisplayDecimal("0", decimals);
-  return multiplyDecimals(value ?? "0", String(t), decimals);
+  if (!Number.isFinite(t) || t <= 0) return "0,00";
+  return formatEsVeInput(multiplyDecimals(value ?? "0", String(t), decimals), 2);
 }
 
 function toDefaults(compra) {
@@ -93,7 +114,7 @@ function toDefaults(compra) {
     const tasaBcv = compra.tasa_bcv ?? null;
     const mismaQueBcv =
       tasaBcv != null && Math.abs(Number(tasaDoc) - Number(tasaBcv)) < 0.000001;
-    // Modo inicial tentativo; si no coincide con BCV conocido se infiere luego (EUR/USDT) o queda como ajuste/manual.
+    // Modo inicial tentativo; si no coincide con BCV conocido se infiere luego (EUR/USDT/AJU) o queda como ajuste/manual.
     const modoInicial = compra.moneda === "VES" && mismaQueBcv ? "usd_bcv" : compra.moneda === "VES" ? "ajuste" : "usd_bcv";
     const esAjusteDoc = modoInicial === "ajuste";
     const toDivisa2 = (bs) => bsToDivisa(bs, tasaDoc, 2);
@@ -103,12 +124,18 @@ function toDefaults(compra) {
       numero_referencia: compra.numero_referencia ?? "",
       modo_tasa: modoInicial,
       tasa_monto: formatRateInput(tasaDoc),
-      otros_montos: esAjusteDoc ? toDisplayDecimal(compra.otros_montos ?? "0", 2) : toDivisa2(compra.otros_montos ?? "0"),
+      otros_montos: formatEsVeInput(
+        esAjusteDoc ? (compra.otros_montos ?? "0") : toDivisa2(compra.otros_montos ?? "0"),
+        2,
+      ),
       notas: compra.notas ?? "",
       detalles: (compra.lineas || []).map((linea) => ({
         producto: String(linea.producto),
-        cantidad: toDisplayDecimal(linea.cantidad, 2),
-        costo_unitario: esAjusteDoc ? toDisplayDecimal(linea.costo_unitario, 2) : bsToDivisa(linea.costo_unitario, tasaDoc, 2),
+        cantidad: formatEsVeInput(linea.cantidad, 2),
+        costo_unitario: formatEsVeInput(
+          esAjusteDoc ? (linea.costo_unitario ?? "0") : bsToDivisa(linea.costo_unitario, tasaDoc, 2),
+          2,
+        ),
         aplica_iva: linea.aplica_iva !== false,
       })),
     };
@@ -117,7 +144,7 @@ function toDefaults(compra) {
     proveedor: "",
     fecha: todayISO(),
     numero_referencia: "",
-    modo_tasa: "usd_bcv",
+    modo_tasa: "eur_bcv",
     tasa_monto: "",
     otros_montos: "0,00",
     notas: "",
@@ -139,7 +166,7 @@ export function CompraFormModal({ compra, proveedores, productos, onClose }) {
   const [montosConvertidos, setMontosConvertidos] = useState(!compra || coincideBcvInicial);
   const [tasaLista, setTasaLista] = useState(!compra);
   const prevModoRef = useRef(null);
-  const lastTasaDivisaRef = useRef({ usd_bcv: 0, eur_bcv: 0, usdt: 0 });
+  const lastTasaDivisaRef = useRef({ usd_bcv: 0, eur_bcv: 0, usdt: 0, aju: 0 });
   const mutation = useSaveCompra();
 
   const {
@@ -154,6 +181,16 @@ export function CompraFormModal({ compra, proveedores, productos, onClose }) {
     defaultValues: toDefaults(compra),
   });
   const { fields, append, remove } = useFieldArray({ control, name: "detalles" });
+
+  // Al salir del campo, deja el monto en formato es-VE (miles con punto y coma decimal).
+  function formatMontoOnBlur(name) {
+    return (event) => {
+      const formatted = formatEsVeInput(event.target.value, 2);
+      if (formatted && formatted !== event.target.value) {
+        setValue(name, formatted, { shouldDirty: true, shouldValidate: true });
+      }
+    };
+  }
 
   const modoTasa = useWatch({ control, name: "modo_tasa" }) ?? "usd_bcv";
   const fecha = useWatch({ control, name: "fecha" }) ?? "";
@@ -170,6 +207,7 @@ export function CompraFormModal({ compra, proveedores, productos, onClose }) {
   const debeInferirModo = Boolean(compra && compra.moneda === "VES" && !coincideBcvInicial);
   const tasaEurDoc = useTasaVigente("VES", "EUR", fechaDoc);
   const tasaUsdtDoc = useTasaVigente("VES", "USDT", fechaDoc);
+  const tasaAjuDoc = useTasaVigente("VES", "AJU", fechaDoc);
 
   useEffect(() => {
     if (!debeInferirModo || modoInferido) return;
@@ -187,6 +225,7 @@ export function CompraFormModal({ compra, proveedores, productos, onClose }) {
     }
     const eur = tasaEurDoc.data?.tasa;
     const usdt = tasaUsdtDoc.data?.tasa;
+    const aju = tasaAjuDoc.data?.tasa;
     if (eur && Math.abs(tasaDocNum - Number(eur)) < 0.000001) {
       setValue("modo_tasa", "eur_bcv", { shouldDirty: false, shouldValidate: true });
       setModoInferido(true);
@@ -197,8 +236,13 @@ export function CompraFormModal({ compra, proveedores, productos, onClose }) {
       setModoInferido(true);
       return;
     }
-    if (tasaEurDoc.isFetched && tasaUsdtDoc.isFetched) {
-      // Tasa distinta a BCV/EUR/USDT: se mantiene como Ajuste (tasa manual base de cálculo).
+    if (aju && Math.abs(tasaDocNum - Number(aju)) < 0.000001) {
+      setValue("modo_tasa", "aju", { shouldDirty: false, shouldValidate: true });
+      setModoInferido(true);
+      return;
+    }
+    if (tasaEurDoc.isFetched && tasaUsdtDoc.isFetched && tasaAjuDoc.isFetched) {
+      // Tasa distinta a BCV/EUR/USDT/AJU: se mantiene como Ajuste (tasa manual base de cálculo).
       setModoInferido(true);
       setMontosConvertidos(true);
     }
@@ -210,6 +254,8 @@ export function CompraFormModal({ compra, proveedores, productos, onClose }) {
     tasaEurDoc.isFetched,
     tasaUsdtDoc.data,
     tasaUsdtDoc.isFetched,
+    tasaAjuDoc.data,
+    tasaAjuDoc.isFetched,
     setValue,
   ]);
 
@@ -227,7 +273,7 @@ export function CompraFormModal({ compra, proveedores, productos, onClose }) {
       const costo = d?.costo_unitario ?? "0";
       let costoBs = "0,00";
       if (fromAjuste) {
-        costoBs = toDisplayDecimal(String(costo || "0").replace(",", "."), 2);
+        costoBs = formatEsVeInput(costo || "0", 2);
       } else {
         costoBs = divisaToBs(costo || "0", fr, 2);
       }
@@ -238,7 +284,7 @@ export function CompraFormModal({ compra, proveedores, productos, onClose }) {
       }
     });
     const otros = getValues("otros_montos") ?? "0,00";
-    const otrosBs = fromAjuste ? toDisplayDecimal(String(otros).replace(",", "."), 2) : divisaToBs(otros, fr, 2);
+    const otrosBs = fromAjuste ? formatEsVeInput(otros || "0", 2) : divisaToBs(otros, fr, 2);
     if (toAjuste) {
       setValue("otros_montos", otrosBs, rateOptions);
     } else {
@@ -322,10 +368,10 @@ export function CompraFormModal({ compra, proveedores, productos, onClose }) {
     getValues,
   ]);
 
-  // Al editar: si la tasa del documento resulta ser EUR/USDT (no BCV), convertir montos Bs -> divisa una vez.
+  // Al editar: si la tasa del documento resulta ser EUR/USDT/AJU (no BCV), convertir montos Bs -> divisa una vez.
   useEffect(() => {
     if (!compra || montosConvertidos || !modoInferido) return;
-    if (modoTasa === "eur_bcv" || modoTasa === "usdt") {
+    if (modoTasa === "eur_bcv" || modoTasa === "usdt" || modoTasa === "aju") {
       const t = parseRate(tasaMonto) || parseRate(compra.tasa_cambio);
       if (!(t > 0)) return;
       setValue("otros_montos", bsToDivisa(compra.otros_montos ?? "0", t, 2), rateOptions);
@@ -368,7 +414,7 @@ export function CompraFormModal({ compra, proveedores, productos, onClose }) {
   const onSubmit = handleSubmit(async (values) => {
     setError(null);
     const esAjusteSubmit = values.modo_tasa === "ajuste";
-    const norm = (v, dp = 2) => toApiDecimal(v, dp);
+    const norm = (v, dp = 2) => toApiDecimal(formatEsVeInput(v, 2) || v, dp);
     const t = esAjusteSubmit ? 1 : parseRate(values.tasa_monto);
     if (!esAjusteSubmit && !(t > 0)) {
       setError(`No hay tasa registrada para ${baseDivisa(values.modo_tasa)} en la fecha seleccionada. Selecciona "Ajuste" para ingresar una tasa manual.`);
@@ -382,6 +428,7 @@ export function CompraFormModal({ compra, proveedores, productos, onClose }) {
       fecha: values.fecha,
       numero_referencia: values.numero_referencia?.trim() || "",
       moneda: "VES",
+      divisa: esAjusteSubmit ? "VES" : baseDivisa(values.modo_tasa),
       tasa_cambio: norm(values.tasa_monto, 6),
       otros_montos: esAjusteSubmit ? norm(values.otros_montos || "0", 2) : toBs2(norm(values.otros_montos)),
       notas: values.notas.trim(),
@@ -439,7 +486,7 @@ export function CompraFormModal({ compra, proveedores, productos, onClose }) {
             })}
           />
           <Input label="N.º orden / factura" placeholder="Factura u orden del proveedor" error={errors.numero_referencia?.message} {...register("numero_referencia")} />
-          <Input label={`Otros montos ${esAjuste ? "(Bs)" : `(${divisa})`}`} inputMode="decimal" hint="Monto adicional sin IVA; se suma al total de la factura." error={errors.otros_montos?.message} {...register("otros_montos")} />
+          <Input label={`Otros montos ${esAjuste ? "(Bs)" : `(${divisa})`}`} inputMode="decimal" hint="Monto adicional sin IVA; se suma al total de la factura. Usa el formato 1.234,56." error={errors.otros_montos?.message} {...register("otros_montos", { onBlur: formatMontoOnBlur("otros_montos") })} />
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -451,16 +498,16 @@ export function CompraFormModal({ compra, proveedores, productos, onClose }) {
             <option value="usd_bcv">Dólar BCV</option>
             <option value="eur_bcv">Euro BCV</option>
             <option value="usdt">USDT</option>
-            <option value="ajuste">Ajuste</option>
+            <option value="aju">Ajustada (AJU)</option>
           </Select>
           <div className="sm:col-span-1 xl:col-span-2">
             {esAjuste ? (
               <Input
                 label="Tasa ajustada (Bs) *"
                 inputMode="decimal"
-                hint="Modo Ajuste: ingresa la tasa/monto en Bs que será la base de todos los cálculos de la compra (como las tasas BCV/USDT en los otros modos)."
+                hint="Modo Ajuste: ingresa la tasa/monto en Bs que será la base de todos los cálculos de la compra (como las tasas BCV/USDT/AJU en los otros modos). Formato: 1.234,56."
                 error={errors.tasa_monto?.message}
-                {...register("tasa_monto")}
+                {...register("tasa_monto", { onBlur: formatMontoOnBlur("tasa_monto") })}
               />
             ) : (
               <Input
@@ -517,8 +564,8 @@ export function CompraFormModal({ compra, proveedores, productos, onClose }) {
                     <option value="">Selecciona un producto</option>
                     {productos.map((p) => (<option key={p.id} value={p.id}>{p.sku} · {p.nombre}</option>))}
                   </Select>
-                  <Input label="Cantidad" inputMode="decimal" error={errors.detalles?.[index]?.cantidad?.message} {...register(`detalles.${index}.cantidad`)} />
-                  <Input label={`Costo unit. (${esAjuste ? "Bs" : divisa})`} inputMode="decimal" error={errors.detalles?.[index]?.costo_unitario?.message} {...register(`detalles.${index}.costo_unitario`)} />
+                  <Input label="Cantidad" inputMode="decimal" hint="Formato: 1.234,56" error={errors.detalles?.[index]?.cantidad?.message} {...register(`detalles.${index}.cantidad`, { onBlur: formatMontoOnBlur(`detalles.${index}.cantidad`) })} />
+                  <Input label={`Costo unit. (${esAjuste ? "Bs" : divisa})`} inputMode="decimal" hint="Formato: 1.234,56" error={errors.detalles?.[index]?.costo_unitario?.message} {...register(`detalles.${index}.costo_unitario`, { onBlur: formatMontoOnBlur(`detalles.${index}.costo_unitario`) })} />
                   <label className="flex items-center gap-2 pt-7 text-sm font-medium text-slate-700"><input type="checkbox" className="h-4 w-4 rounded border-slate-300 text-indigo-600" {...register(`detalles.${index}.aplica_iva`)} />IVA</label>
                   <div className="flex items-end justify-between gap-2 sm:flex-col sm:items-end">
                     <div className="text-right">
@@ -547,7 +594,7 @@ export function CompraFormModal({ compra, proveedores, productos, onClose }) {
         </div>
 
         <Alert tone="info">
-          El documento se calcula y guarda en Bs (VES) usando como base la tasa seleccionada (BCV, EUR, USDT o Ajuste). Al recibir la compra se generan movimientos al kardex y se recalcula el costo promedio. Una compra recibida no se edita: se anula con su reverso.
+          El documento se calcula y guarda en Bs (VES) usando como base la tasa seleccionada (BCV, EUR, USDT, AJU o Ajuste). Al recibir la compra se generan movimientos al kardex y se recalcula el costo promedio. Una compra recibida no se edita: se anula con su reverso.
         </Alert>
       </form>
     </Modal>

@@ -237,12 +237,9 @@ def _normalizar_detalles(detalles: list[dict], iva_rate: Decimal) -> list[dict]:
         subtotal_linea = money(bruto_linea - descuento_linea)
         if subtotal_linea < 0:
             subtotal_linea = Decimal("0.00")
-        aplica_iva = bool(aplica_iva)
-        iva_linea = (
-            money(subtotal_linea * to_decimal(iva_rate) / Decimal("100"))
-            if aplica_iva
-            else Decimal("0.00")
-        )
+        # En pedidos no se calcula IVA para productos ni combos.
+        aplica_iva = False
+        iva_linea = Decimal("0.00")
 
         normalizados.append(
             {
@@ -438,7 +435,7 @@ def _sincronizar_deuda_contado_borrador(pedido: Pedido, deuda: Deuda, user=None)
     debe seguir siendo consistente con lo registrado.
     """
     from apps.finances.models import PagoAplicacion
-    from apps.finances.services import crear_plan_cuotas
+    from apps.finances.services import crear_plan_cuotas, saldos_en_bs_y_divisa
 
     deuda = Deuda.objects.select_for_update().get(pk=deuda.pk)
     if deuda.estado == Deuda.Estado.ANULADA:
@@ -477,6 +474,13 @@ def _sincronizar_deuda_contado_borrador(pedido: Pedido, deuda: Deuda, user=None)
     if money(deuda.saldo) != total:
         deuda.saldo = total
         campos_update.append("saldo")
+    saldo_bs, saldo_base = saldos_en_bs_y_divisa(total, moneda, tasa)
+    if money(deuda.saldo_bs) != saldo_bs:
+        deuda.saldo_bs = saldo_bs
+        campos_update.append("saldo_bs")
+    if money(deuda.saldo_base) != saldo_base:
+        deuda.saldo_base = saldo_base
+        campos_update.append("saldo_base")
     if deuda.tasa_bcv != pedido.tasa_bcv:
         deuda.tasa_bcv = pedido.tasa_bcv
         campos_update.append("tasa_bcv")
@@ -702,8 +706,11 @@ def asegurar_deuda_contado_borrador(pedido: Pedido, user=None) -> Deuda:
     empresa = get_empresa()
     if empresa is None:
         raise BusinessRuleError("Primero configura los datos fiscales de la empresa.")
+    from apps.finances.services import saldos_en_bs_y_divisa
+
     moneda = pedido.moneda or empresa.moneda_base
     tasa = pedido.tasa_cambio or Decimal("1.000000")
+    saldo_bs, saldo_base = saldos_en_bs_y_divisa(pedido.total, moneda, tasa)
     deuda = Deuda(
         cliente=pedido.cliente,
         pedido=pedido,
@@ -711,6 +718,8 @@ def asegurar_deuda_contado_borrador(pedido: Pedido, user=None) -> Deuda:
         tasa_cambio=tasa,
         monto_original=pedido.total,
         saldo=pedido.total,
+        saldo_bs=saldo_bs,
+        saldo_base=saldo_base,
         tasa_bcv=pedido.tasa_bcv,
         tasa_bcv_vigente_desde=pedido.tasa_bcv_vigente_desde,
         fecha_emision=pedido.fecha,
@@ -863,7 +872,7 @@ def _crear_deuda_desde_pedido(
     pedido: Pedido, fecha_vencimiento, numero_cuotas: int = 1, user=None
 ) -> Deuda:
     """Crea la Deuda asociada a un pedido confirmado a crédito y su plan de cuotas."""
-    from apps.finances.services import crear_plan_cuotas
+    from apps.finances.services import crear_plan_cuotas, saldos_en_bs_y_divisa
 
     existente = Deuda.objects.filter(pedido=pedido).first()
     if existente is not None:
@@ -882,6 +891,7 @@ def _crear_deuda_desde_pedido(
     )
     fecha_base = pedido.fecha_primera_cuota or pedido.fecha
 
+    saldo_bs, saldo_base = saldos_en_bs_y_divisa(pedido.total, moneda, tasa)
     deuda = Deuda(
         cliente=pedido.cliente,
         pedido=pedido,
@@ -889,6 +899,8 @@ def _crear_deuda_desde_pedido(
         tasa_cambio=tasa,
         monto_original=pedido.total,
         saldo=pedido.total,
+        saldo_bs=saldo_bs,
+        saldo_base=saldo_base,
         tasa_bcv=pedido.tasa_bcv,
         tasa_bcv_vigente_desde=pedido.tasa_bcv_vigente_desde,
         fecha_emision=pedido.fecha,

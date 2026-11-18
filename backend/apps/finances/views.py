@@ -97,8 +97,14 @@ class DeudaViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = (IsAuthenticatedAndCompanyReady, FinanzasReadCobroAccess)
     filterset_class = DeudaFilter
     search_fields = ("pedido__numero", "cliente__nombre", "cliente__codigo")
-    ordering_fields = ("fecha_emision", "fecha_vencimiento", "saldo")
-    ordering = ("-fecha_emision", "-id")
+    ordering_fields = (
+        "fecha_emision",
+        "fecha_vencimiento",
+        "saldo",
+        "pedido__numero",
+        "pedido__fecha",
+    )
+    ordering = ("pedido__fecha", "pedido__numero")
 
     @action(detail=False, methods=["get"], url_path="pendientes")
     def pendientes(self, request):

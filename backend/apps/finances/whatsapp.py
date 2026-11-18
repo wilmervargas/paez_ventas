@@ -26,7 +26,7 @@ from apps.common.utils.phone import normalize_phone, phone_digits
 
 logger = logging.getLogger(__name__)
 
-MONEDAS = {"USD": "$", "VES": "Bs", "EUR": "€", "USDT": "USDT"}
+MONEDAS = {"USD": "$", "VES": "Bs", "EUR": "€", "USDT": "USDT", "AJU": "AJU"}
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +164,10 @@ def _fmt_fecha(value) -> str:
 
 def resumen_cobro(deuda, mensaje: str | None = None) -> dict:
     """Construye el resumen del cliente (deudas + pagos) y el texto del mensaje."""
+    from django.utils import timezone
+
     from apps.company.models import Empresa
+    from apps.company.services import get_tasa_vigente
 
     from .models import Deuda, Pago
 
@@ -183,10 +186,23 @@ def resumen_cobro(deuda, mensaje: str | None = None) -> dict:
     pagos_qs = Pago.objects.filter(cliente=cliente, anulado=False)
     pagos = list(pagos_qs.order_by("-fecha_pago", "-id"))
 
+    tasa_aju = get_tasa_vigente("VES", base="AJU")
+    if tasa_aju is not None:
+        tasa_aju_texto = f"{money(tasa_aju.tasa):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        tasa_aju_fecha = _fmt_fecha(timezone.localtime(tasa_aju.vigente_desde).date())
+        linea_tasa_aju = (
+            f"*Tasa Ajustada (AJU) vigente al día del cobro:* "
+            f"*_{tasa_aju_texto} Bs por 1 AJU_* (vigente desde {tasa_aju_fecha})"
+        )
+    else:
+        linea_tasa_aju = "*Tasa Ajustada (AJU) vigente al día del cobro:* *_No disponible_*"
+
     lineas = [
         f"Hola {cliente.nombre} 👋",
         "",
         f"Le escribimos de *{nombre_empresa}* para recordarle su estado de cuenta.",
+        "",
+        linea_tasa_aju,
         "",
         "*Deudas pendientes:*",
     ]
@@ -194,6 +210,9 @@ def resumen_cobro(deuda, mensaje: str | None = None) -> dict:
     if deudas:
         for item in deudas:
             linea = f"Pedido {item.pedido.numero}: {_fmt_monto(item.saldo, item.moneda)}"
+            saldo_ves_actual = getattr(item, "saldo_ves_actual", None)
+            if saldo_ves_actual is not None:
+                linea += f" · VES actualizado {_fmt_monto(saldo_ves_actual, 'VES')}"
             if item.fecha_vencimiento:
                 linea += f" · vence {_fmt_fecha(item.fecha_vencimiento)}"
             proxima = next((c for c in item.cuotas.all() if c.saldo > 0), None)
@@ -201,6 +220,9 @@ def resumen_cobro(deuda, mensaje: str | None = None) -> dict:
                 if not item.fecha_vencimiento:
                     linea += f" · próxima cuota {_fmt_fecha(proxima.fecha_vencimiento)}"
                 linea += f" · pendiente por pagar {_fmt_monto(proxima.saldo, item.moneda)}"
+                monto_ves_cuota = getattr(proxima, "monto_ves_actual", None)
+                if monto_ves_cuota is not None:
+                    linea += f" · VES actualizado cuota {_fmt_monto(monto_ves_cuota, 'VES')}"
             lineas.append(f"• *_{linea}_*")
         # Se incluyen todas las deudas pendientes del cliente.
     else:

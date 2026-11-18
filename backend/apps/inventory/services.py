@@ -10,6 +10,7 @@ from django.db.models import ProtectedError
 from apps.common.exceptions import BusinessRuleError, RecursoVinculadoError
 from apps.common.utils.files import delete_replaced_file
 from apps.common.utils.money import money, to_decimal
+from apps.company.services import get_moneda_base
 
 from .models import (
     CategoriaProducto,
@@ -48,6 +49,10 @@ def registrar_movimiento(
     cantidad,
     direccion: str | None = None,
     costo_unitario=None,
+    costo_unitario_bs=None,
+    costo_unitario_base=None,
+    moneda: str | None = None,
+    tasa_cambio=None,
     motivo: str = "",
     referencia_tipo: str = "",
     referencia_id: int | None = None,
@@ -56,6 +61,16 @@ def registrar_movimiento(
     """Registra un movimiento y actualiza el stock/costo del producto.
 
     La cantidad siempre es positiva; `direccion` define el signo.
+
+    El costo se guarda en tres monedas para que el kardex sea auditable:
+
+    - `costo_unitario`: en `moneda` (la divisa de la operación, p. ej. USD/EUR/USDT).
+    - `costo_unitario_bs`: equivalente en bolívares.
+    - `costo_unitario_base`: equivalente en la moneda base de la empresa; es el
+      valor que alimenta el costo promedio y los reportes consolidados.
+
+    Si no se indica `moneda`, el costo se interpreta en moneda base (comportamiento
+    histórico de ventas y ajustes).
     """
     producto = Producto.objects.select_for_update().get(pk=producto.pk)
 
@@ -67,12 +82,37 @@ def registrar_movimiento(
     if direccion not in MovimientoInventario.Direccion.values:
         raise BusinessRuleError("Debes indicar si el ajuste es una entrada o una salida.")
 
+    moneda_base = get_moneda_base()
+    moneda = (moneda or moneda_base).strip().upper() or moneda_base
     if costo_unitario is None:
+        # El costo del catálogo está en moneda base.
         costo_unitario_dec = to_decimal(producto.costo)
+        moneda = moneda_base
+        base_dec = costo_unitario_dec
     else:
         costo_unitario_dec = to_decimal(costo_unitario)
-    if costo_unitario_dec < 0:
+        base_dec = (
+            to_decimal(costo_unitario_base)
+            if costo_unitario_base is not None
+            else costo_unitario_dec
+        )
+
+    if costo_unitario_dec < 0 or base_dec < 0:
         raise BusinessRuleError("El costo unitario no puede ser negativo.")
+
+    tasa_dec = to_decimal(tasa_cambio) if tasa_cambio is not None else Decimal("1")
+    if tasa_dec <= 0:
+        raise BusinessRuleError("La tasa de cambio debe ser mayor que cero.")
+    if costo_unitario_bs is not None:
+        bs_dec = to_decimal(costo_unitario_bs)
+    elif moneda == "VES":
+        bs_dec = costo_unitario_dec
+    elif tasa_cambio is not None:
+        bs_dec = costo_unitario_dec * tasa_dec
+    else:
+        bs_dec = Decimal("0")
+    if bs_dec < 0:
+        raise BusinessRuleError("El costo unitario en bolívares no puede ser negativo.")
 
     delta = cantidad_dec if direccion == MovimientoInventario.Direccion.ENTRADA else -cantidad_dec
     nuevo_stock = producto.stock + delta
@@ -88,6 +128,10 @@ def registrar_movimiento(
         direccion=direccion,
         cantidad=cantidad_dec,
         costo_unitario=costo_unitario_dec.quantize(CUATRO_DECIMALES, rounding=ROUND_HALF_UP),
+        moneda=moneda,
+        tasa_cambio=tasa_dec.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP),
+        costo_unitario_bs=bs_dec.quantize(CUATRO_DECIMALES, rounding=ROUND_HALF_UP),
+        costo_unitario_base=base_dec.quantize(CUATRO_DECIMALES, rounding=ROUND_HALF_UP),
         motivo=motivo,
         referencia_tipo=referencia_tipo,
         referencia_id=referencia_id,
@@ -95,14 +139,14 @@ def registrar_movimiento(
     )
     _validar_modelo(movimiento)
 
-    if direccion == MovimientoInventario.Direccion.ENTRADA and costo_unitario_dec > 0:
+    if direccion == MovimientoInventario.Direccion.ENTRADA and base_dec > 0:
         costo_anterior = to_decimal(producto.costo)
         if producto.stock > 0:
             costo_promedio = (
-                producto.stock * costo_anterior + cantidad_dec * costo_unitario_dec
+                producto.stock * costo_anterior + cantidad_dec * base_dec
             ) / nuevo_stock
         else:
-            costo_promedio = costo_unitario_dec
+            costo_promedio = base_dec
         producto.costo = money(costo_promedio)
 
     movimiento.save()

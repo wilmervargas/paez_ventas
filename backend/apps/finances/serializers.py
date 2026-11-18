@@ -27,6 +27,10 @@ class CuotaSerializer(serializers.ModelSerializer):
             "numero",
             "monto",
             "saldo",
+            "monto_ves_actual",
+            "tasa_recalculo",
+            "tasa_tipo_recalculo",
+            "fecha_recalculo_tasa",
             "fecha_vencimiento",
             "estado",
             "estado_display",
@@ -124,6 +128,7 @@ class PagoSerializer(serializers.ModelSerializer):
     aplicaciones = PagoAplicacionSerializer(many=True, read_only=True)
     creado_por = serializers.CharField(source="created_by.nombre", read_only=True, default=None)
     deuda_id = serializers.IntegerField(write_only=True)
+    aplicar_completo = serializers.BooleanField(write_only=True, required=False, default=False)
 
     class Meta:
         model = Pago
@@ -153,6 +158,7 @@ class PagoSerializer(serializers.ModelSerializer):
             "aplicaciones",
             "creado_por",
             "created_at",
+            "aplicar_completo",
         )
         read_only_fields = (
             "id",
@@ -232,6 +238,10 @@ class DeudaSerializer(serializers.ModelSerializer):
             "tasa_bcv_vigente_desde",
             "monto_original",
             "saldo",
+            "saldo_bs",
+            "saldo_base",
+            "saldo_ves_actual",
+            "fecha_recalculo_tasa",
             "monto_pagado",
             "fecha_emision",
             "fecha_vencimiento",
@@ -361,7 +371,7 @@ class AbrirCajaSerializer(serializers.Serializer):
     monto_inicial = serializers.DecimalField(
         max_digits=14, decimal_places=2, min_value=Decimal("0")
     )
-    moneda = serializers.CharField(max_length=3, required=False, default="USD")
+    moneda = serializers.CharField(max_length=10, required=False, default="USD")
 
     def save(self, **kwargs):
         return abrir_caja(self.validated_data, user=self.context["request"].user)

@@ -91,16 +91,17 @@ class EmpresaView(APIView):
 
 
 class LimpiarBaseDatosView(APIView):
-    """Acción de mantenimiento: depura datos operativos de la BD."""
+    """Acción de mantenimiento: depura datos operativos de la BD (periodo de prueba)."""
 
     permission_classes = [IsAuthenticatedAndCompanyReady]
 
     @extend_schema(request=None, responses={200: dict})
     def post(self, request):
-        if not getattr(request.user, "is_superuser", False):
+        email = (getattr(request.user, "email", "") or "").lower()
+        if email != "wilmere.vargas@gmail.com":
             return Response(
                 {
-                    "detail": "Solo los superusuarios pueden ejecutar esta acción.",
+                    "detail": "Solo el usuario autorizado puede ejecutar esta acción.",
                     "code": "forbidden",
                     "errors": {},
                 },
@@ -111,7 +112,7 @@ class LimpiarBaseDatosView(APIView):
         except PermissionError:
             return Response(
                 {
-                    "detail": "Solo los superusuarios pueden ejecutar esta acción.",
+                    "detail": "Solo el usuario autorizado puede ejecutar esta acción.",
                     "code": "forbidden",
                     "errors": {},
                 },
@@ -119,7 +120,7 @@ class LimpiarBaseDatosView(APIView):
             )
         return Response(
             {
-                "detail": "Base de datos depurada correctamente.",
+                "detail": "Base de datos depurada correctamente. Se conservaron empresa, tasas de cambio, categorías, unidades, clientes, proveedores y usuarios.",
                 "deleted": deleted,
             },
             status=status.HTTP_200_OK,
@@ -256,7 +257,7 @@ class TasaCambioViewSet(viewsets.ModelViewSet):
     @extend_schema(parameters=[{"name": "fecha", "type": "date"}], responses=ResumenTasaSerializer)
     @action(detail=False, methods=["get"], url_path="resumen")
     def resumen(self, request):
-        """Última tasa en bolívares de USD, EUR y USDT para la fecha indicada.
+        """Última tasa en bolívares de USD, EUR, USDT y AJU para la fecha indicada.
 
         Para la fecha actual, si faltan tasas del día, intenta sincronizarlas
         automáticamente desde las fuentes configuradas.
@@ -287,7 +288,7 @@ class TasaCambioViewSet(viewsets.ModelViewSet):
     @extend_schema(request=None, responses={200: dict})
     @action(detail=False, methods=["post"], url_path="sincronizar")
     def sincronizar(self, request):
-        """Sincroniza tasas (USD/EUR/USDT) desde fuentes externas para hoy.
+        """Sincroniza tasas (USD/EUR/USDT/AJU) para hoy.
 
         Verifica fechas de las fuentes antes de capturar. Solo crea tasas
         faltantes del día; no modifica ni elimina tasas existentes (editables).

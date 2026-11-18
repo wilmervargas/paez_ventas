@@ -1,6 +1,5 @@
 import {
   ArrowRightLeft,
-  Banknote,
   CreditCard,
   Package,
   ShoppingCart,
@@ -17,6 +16,7 @@ export const MONEDAS = [
   { value: "VES", label: "VES — Bolívar" },
   { value: "EUR", label: "EUR — Euro" },
   { value: "USDT", label: "USDT — Tether" },
+  { value: "AJU", label: "AJU — Ajustada" },
 ];
 
 const ESTADOS_PEDIDO = [
@@ -36,11 +36,6 @@ const ESTADOS_COMPRA = [
   { value: "borrador", label: "Borrador" },
   { value: "recibida", label: "Recibida" },
   { value: "anulada", label: "Anulada" },
-];
-
-const ESTADOS_CAJA = [
-  { value: "abierta", label: "Abierta" },
-  { value: "cerrada", label: "Cerrada" },
 ];
 
 const TIPOS_PAGO = [
@@ -182,18 +177,6 @@ export const REPORTES = [
       { key: "metodo", label: "Método de pago", type: "select", options: METODOS_PAGO, placeholder: "Todos los métodos" },
       filtroMoneda,
       incluirAnulados,
-    ],
-  },
-  {
-    tipo: "caja",
-    label: "Caja",
-    titulo: "Reporte de caja",
-    descripcion: "Sesiones de caja, ingresos, egresos y arqueos del período.",
-    icon: Banknote,
-    roles: ["admin", "cobrador"],
-    filtros: [
-      ...rangoFechas,
-      { key: "estado", label: "Estado", type: "select", options: ESTADOS_CAJA, placeholder: "Todos los estados" },
     ],
   },
   {

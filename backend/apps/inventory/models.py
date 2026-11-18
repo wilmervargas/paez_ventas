@@ -220,6 +220,34 @@ class MovimientoInventario(BaseModel):
         max_digits=14,
         decimal_places=4,
         default=Decimal("0.0000"),
+        help_text="Costo por unidad en la moneda del movimiento (divisa de la compra).",
+    )
+    moneda = models.CharField(
+        "moneda del costo",
+        max_length=4,
+        blank=True,
+        default="",
+        help_text="Divisa en la que está expresado `costo_unitario` (USD, EUR, USDT, VES).",
+    )
+    tasa_cambio = models.DecimalField(
+        "tasa de cambio",
+        max_digits=18,
+        decimal_places=6,
+        default=Decimal("1.000000"),
+        help_text="Unidades de bolívares por 1 unidad de la moneda del costo.",
+    )
+    costo_unitario_bs = models.DecimalField(
+        "costo unitario en bolívares",
+        max_digits=14,
+        decimal_places=4,
+        default=Decimal("0.0000"),
+    )
+    costo_unitario_base = models.DecimalField(
+        "costo unitario en moneda base",
+        max_digits=14,
+        decimal_places=4,
+        default=Decimal("0.0000"),
+        help_text="Valor usado para el costo promedio y los reportes consolidados.",
     )
     motivo = models.CharField("motivo", max_length=200, blank=True)
     referencia_tipo = models.CharField("tipo de referencia", max_length=30, blank=True)
@@ -255,8 +283,14 @@ class MovimientoInventario(BaseModel):
         errors = {}
         if self.cantidad is not None and self.cantidad <= 0:
             errors["cantidad"] = "La cantidad debe ser mayor que cero."
-        if self.costo_unitario is not None and self.costo_unitario < 0:
-            errors["costo_unitario"] = "El costo unitario no puede ser negativo."
+        for campo in ("costo_unitario", "costo_unitario_bs", "costo_unitario_base"):
+            valor = getattr(self, campo)
+            if valor is not None and valor < 0:
+                errors[campo] = "El costo unitario no puede ser negativo."
+        if self.tasa_cambio is not None and self.tasa_cambio <= 0:
+            errors["tasa_cambio"] = "La tasa de cambio debe ser mayor que cero."
+        if self.moneda:
+            self.moneda = self.moneda.strip().upper()
 
         direccion_esperada = {
             self.Tipo.COMPRA: self.Direccion.ENTRADA,

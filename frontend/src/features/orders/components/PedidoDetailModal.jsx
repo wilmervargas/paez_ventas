@@ -14,7 +14,7 @@ const TONES = {
   anulado: "neutral",
 };
 
-function describeTasaPedido(pedido, tasaEur, tasaUsdt) {
+function describeTasaPedido(pedido, tasaEur, tasaUsdt, tasaAju) {
   const tasa = formatRate(pedido.tasa_cambio);
   const tasaDoc = Number(pedido.tasa_cambio || 0);
   const tasaBcv = Number(pedido.tasa_bcv ?? 0);
@@ -32,6 +32,9 @@ function describeTasaPedido(pedido, tasaEur, tasaUsdt) {
   if (tasaUsdt && Math.abs(tasaDoc - Number(tasaUsdt)) < 0.000001) {
     return `${tasa} (USDT, por 1 USDT)`;
   }
+  if (tasaAju && Math.abs(tasaDoc - Number(tasaAju)) < 0.000001) {
+    return `${tasa} (Ajustada, por 1 AJU)`;
+  }
   if (pedido.moneda === "VES") {
     return `${tasa} (Ajuste/Manual)`;
   }
@@ -46,13 +49,28 @@ export function PedidoDetailModal({ pedido, onClose }) {
   const necesitaInferir = pedido.moneda === "VES" && !coincideBcv;
   const tasaEurDoc = useTasaVigente("VES", "EUR", necesitaInferir ? pedido.fecha : "");
   const tasaUsdtDoc = useTasaVigente("VES", "USDT", necesitaInferir ? pedido.fecha : "");
-  const tasaLabel = describeTasaPedido(pedido, tasaEurDoc.data?.tasa, tasaUsdtDoc.data?.tasa);
+  const tasaAjuDoc = useTasaVigente("VES", "AJU", necesitaInferir ? pedido.fecha : "");
+  const tasaLabel = describeTasaPedido(pedido, tasaEurDoc.data?.tasa, tasaUsdtDoc.data?.tasa, tasaAjuDoc.data?.tasa);
 
   let tipoTasa = "ajuste";
   if (coincideBcv) tipoTasa = "usd_bcv";
   else if (tasaEurDoc.data?.tasa && Math.abs(tasaDoc - Number(tasaEurDoc.data.tasa)) < 0.000001) tipoTasa = "eur_bcv";
   else if (tasaUsdtDoc.data?.tasa && Math.abs(tasaDoc - Number(tasaUsdtDoc.data.tasa)) < 0.000001) tipoTasa = "usdt";
+  else if (tasaAjuDoc.data?.tasa && Math.abs(tasaDoc - Number(tasaAjuDoc.data.tasa)) < 0.000001) tipoTasa = "aju";
   else if (pedido.moneda !== "VES") tipoTasa = "otra";
+
+  const monedaDivisa =
+    tipoTasa === "usd_bcv"
+      ? "USD"
+      : tipoTasa === "eur_bcv"
+        ? "EUR"
+        : tipoTasa === "usdt"
+          ? "USDT"
+          : tipoTasa === "aju"
+            ? "AJU"
+            : pedido.moneda === "VES"
+              ? "USD"
+              : pedido.moneda;
 
   const totalBs = pedido.moneda === "VES" ? Number(pedido.total || 0) : Number(pedido.total_ves || 0);
   let totalTasaContratada = null;
@@ -61,7 +79,19 @@ export function PedidoDetailModal({ pedido, onClose }) {
     if (tipoTasa === "usd_bcv") totalTasaContratada = `$ ${eq} (USD)`;
     else if (tipoTasa === "eur_bcv") totalTasaContratada = `€ ${eq} (EUR)`;
     else if (tipoTasa === "usdt") totalTasaContratada = `${eq} USDT`;
+    else if (tipoTasa === "aju") totalTasaContratada = `${eq} AJU`;
     else if (pedido.moneda === "VES") totalTasaContratada = `${eq} (a tasa contratada)`;
+  }
+
+  function subtotalEnDivisa(monto) {
+    if (!(tasaDoc > 0)) return "—";
+    const valor = Number(monto || 0) / tasaDoc;
+    if (!Number.isFinite(valor)) return "—";
+    try {
+      return formatMoney(String(valor), monedaDivisa);
+    } catch {
+      return valor.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
   }
 
   return (
@@ -122,8 +152,7 @@ export function PedidoDetailModal({ pedido, onClose }) {
                 <th className="px-4 py-3 font-semibold">Ítem</th>
                 <th className="px-4 py-3 font-semibold">Cantidad</th>
                 <th className="px-4 py-3 font-semibold">Precio unit.</th>
-                <th className="px-4 py-3 font-semibold">Descuento</th>
-                <th className="px-4 py-3 font-semibold">IVA</th>
+                <th className="px-4 py-3 font-semibold">Subtotal ({monedaDivisa})</th>
                 <th className="px-4 py-3 text-right font-semibold">Subtotal</th>
               </tr>
             </thead>
@@ -150,13 +179,7 @@ export function PedidoDetailModal({ pedido, onClose }) {
                       {formatMoney(linea.precio_unitario, pedido.moneda)}
                     </td>
                     <td className="px-4 py-3 text-slate-600">
-                      {formatMoney(linea.descuento_linea, pedido.moneda)}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      <span className={linea.aplica_iva === false ? "text-slate-400" : ""}>
-                        {formatMoney(linea.iva_linea, pedido.moneda)}
-                      </span>
-                      {linea.aplica_iva === false ? <span className="ml-1 text-xs text-slate-400">(sin IVA)</span> : null}
+                      {subtotalEnDivisa(linea.subtotal)}
                     </td>
                     <td className="px-4 py-3 text-right font-semibold text-slate-900">
                       {formatMoney(linea.subtotal, pedido.moneda)}
@@ -179,12 +202,6 @@ export function PedidoDetailModal({ pedido, onClose }) {
             <span>Descuento</span>
             <span className="font-medium text-slate-900">
               {formatMoney(pedido.descuento, pedido.moneda)}
-            </span>
-          </div>
-          <div className="flex justify-between gap-3 text-slate-600">
-            <span>IVA</span>
-            <span className="font-medium text-slate-900">
-              {formatMoney(pedido.iva, pedido.moneda)}
             </span>
           </div>
           <div className="flex justify-between gap-3 text-slate-600">

@@ -519,11 +519,11 @@ def test_pedido_con_descuento_y_iva(admin_client, empresa, cliente, producto):
     )
 
     assert creada.status_code == 201
-    # (2 * 100 - 10) = 190 subtotal, IVA 16% = 30.40, total = 220.40
+    # (2 * 100 - 10) = 190 subtotal, sin IVA en pedidos
     assert creada.data["subtotal"] == "190.00"
     assert creada.data["descuento"] == "10.00"
-    assert creada.data["iva"] == "30.40"
-    assert creada.data["total"] == "220.40"
+    assert creada.data["iva"] == "0.00"
+    assert creada.data["total"] == "190.00"
 
 
 def test_pedido_moneda_extranjera_con_tasa(admin_client, empresa, cliente, producto):
@@ -539,8 +539,8 @@ def test_pedido_moneda_extranjera_con_tasa(admin_client, empresa, cliente, produ
     )
 
     assert response.status_code == 201
-    assert response.data["total"] == "116.00"  # 100 + 16% IVA
-    assert response.data["total_base"] == "2.90"  # 116 / 40
+    assert response.data["total"] == "100.00"  # sin IVA en pedidos
+    assert response.data["total_base"] == "2.50"  # 100 / 40
 
 
 def test_pedido_moneda_extranjera_sin_tasa_falla(admin_client, empresa, cliente, producto):
@@ -580,9 +580,91 @@ def test_pedido_credito_crea_deuda(admin_client, empresa, cliente, producto):
 
     deuda = Deuda.objects.get(pedido=creada.data["id"])
     assert deuda.cliente_id == cliente.pk
-    assert deuda.monto_original == Decimal("116.00")  # 100 + 16% IVA
-    assert deuda.saldo == Decimal("116.00")
+    assert deuda.monto_original == Decimal("100.00")  # sin IVA en pedidos
+    assert deuda.saldo == Decimal("100.00")
     assert deuda.estado == "pendiente"
+
+
+def test_pedido_credito_vigila_saldos_en_bs_y_divisa(admin_client, empresa, cliente, producto):
+    """La deuda de un pedido a crédito guarda su saldo en Bs y en la divisa de la tasa."""
+    producto.stock = Decimal("10.000")
+    producto.save(update_fields=["stock"])
+
+    creada = admin_client.post(
+        reverse("pedido-list"),
+        _pedido_payload(
+            cliente,
+            [{"producto": producto.pk, "cantidad": "1.000", "precio_unitario": "100.00"}],
+            tipo_pago="credito",
+            moneda="VES",
+            tasa_cambio="40.000000",
+        ),
+        format="json",
+    )
+    admin_client.post(reverse("pedido-confirmar", args=[creada.data["id"]]), format="json")
+
+    deuda = Deuda.objects.get(pedido=creada.data["id"])
+    assert deuda.saldo == Decimal("100.00")
+    assert deuda.saldo_bs == Decimal("100.00")
+    assert deuda.saldo_base == Decimal("2.50")  # 100 Bs / 40
+
+
+def test_cobro_contado_expone_saldos_en_bs_y_divisa(admin_client, empresa, cliente, producto):
+    creada = admin_client.post(
+        reverse("pedido-list"),
+        _pedido_payload(
+            cliente,
+            [{"producto": producto.pk, "cantidad": "1.000", "precio_unitario": "100.00"}],
+            moneda="VES",
+            tasa_cambio="40.000000",
+        ),
+        format="json",
+    )
+    prep = admin_client.post(
+        reverse("pedido-preparar-cobro-contado", args=[creada.data["id"]]), format="json"
+    )
+
+    assert prep.status_code == 200, prep.data
+    assert prep.data["saldo_bs"] == "116.00"
+    assert prep.data["saldo_base"] == "2.90"
+
+
+def test_pago_en_usdt_guarda_moneda_y_recalcula_saldos(admin_client, empresa, cliente, producto):
+    """USDT tiene cuatro letras: el pago se registra y los saldos se mantienen al día."""
+    creada = admin_client.post(
+        reverse("pedido-list"),
+        _pedido_payload(
+            cliente,
+            [{"producto": producto.pk, "cantidad": "1.000", "precio_unitario": "100.00"}],
+            moneda="VES",
+            tasa_cambio="40.000000",
+        ),
+        format="json",
+    )
+    prep = admin_client.post(
+        reverse("pedido-preparar-cobro-contado", args=[creada.data["id"]]), format="json"
+    )
+    deuda_id = prep.data["id"]
+
+    pago = admin_client.post(
+        reverse("pago-list"),
+        {
+            "deuda_id": deuda_id,
+            "monto": "58.00",
+            "moneda": "USDT",
+            "tasa_cambio": "40.000000",
+            "metodo": "transferencia",
+            "fecha_pago": timezone.localdate().isoformat(),
+        },
+        format="json",
+    )
+
+    assert pago.status_code == 201, pago.data
+    assert pago.data["moneda"] == "USDT"
+    deuda = Deuda.objects.get(pk=deuda_id)
+    assert deuda.saldo == Decimal("58.00")
+    assert deuda.saldo_bs == Decimal("58.00")
+    assert deuda.saldo_base == Decimal("1.45")
 
 
 # ---------------------------------------------------------------------------

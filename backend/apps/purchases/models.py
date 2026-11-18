@@ -28,6 +28,16 @@ class Compra(BaseModel):
     )
     fecha = models.DateField("fecha", default=timezone.localdate, db_index=True)
     moneda = models.CharField("moneda", max_length=3, default="USD")
+    divisa = models.CharField(
+        "divisa del costo",
+        max_length=4,
+        blank=True,
+        default="",
+        help_text=(
+            "Divisa convertible elegida para los costos (USD, EUR, USDT) "
+            "o VES si se pagó en bolívares."
+        ),
+    )
     tasa_cambio = models.DecimalField(
         "tasa de cambio",
         max_digits=18,

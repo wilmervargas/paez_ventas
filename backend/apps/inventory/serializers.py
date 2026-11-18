@@ -265,6 +265,10 @@ class MovimientoInventarioSerializer(serializers.ModelSerializer):
             "signo",
             "cantidad",
             "costo_unitario",
+            "moneda",
+            "tasa_cambio",
+            "costo_unitario_bs",
+            "costo_unitario_base",
             "motivo",
             "referencia_tipo",
             "referencia_id",
@@ -276,7 +280,14 @@ class MovimientoInventarioSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         data = super().to_representation(instance)
         if not _puede_ver_costos(self.context.get("request")):
-            data.pop("costo_unitario", None)
+            for campo in (
+                "costo_unitario",
+                "moneda",
+                "tasa_cambio",
+                "costo_unitario_bs",
+                "costo_unitario_base",
+            ):
+                data.pop(campo, None)
         return data
 
 

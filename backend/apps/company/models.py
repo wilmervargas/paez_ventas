@@ -77,6 +77,7 @@ class TasaCambio(BaseModel):
         BCV = "bcv", "BCV"
         USDT = "usdt", "USDT"
         MANUAL = "manual", "Manual"
+        AJUSTADA = "ajustada", "Ajustada"
 
     moneda = models.CharField("moneda", max_length=4, default="VES")
     moneda_base = models.CharField("moneda base", max_length=4, blank=True, default="")

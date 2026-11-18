@@ -78,6 +78,27 @@ export function toDisplayDecimal(value, decimalPlaces) {
 }
 
 /**
+ * Formatea un número al estilo es-VE para inputs: separador de miles con punto
+ * y coma decimal. Acepta tanto el formato API (punto decimal) como valores ya
+ * escritos con coma. Conserva los decimales significativos y garantiza al menos
+ * `minDecimals` decimales para que el valor nunca sea ambiguo (ej. 1500 -> 1.500,00).
+ */
+export function formatEsVeInput(value, minDecimals = 2) {
+    if (value === null || value === undefined) return "";
+    const raw = String(value).trim();
+    if (!raw || !/^[\d.,]+$/.test(raw)) return "";
+    const api = toApiDecimal(raw);
+    if (!api) return "";
+    const [integerRaw, fractionRaw = ""] = api.split(".");
+    const trimmedFraction = fractionRaw.replace(/0+$/, "");
+    const fraction = trimmedFraction.length >= minDecimals
+        ? trimmedFraction
+        : (trimmedFraction || "0").padEnd(minDecimals, "0");
+    const integer = integerRaw.replace(/^0+(?=\d)/, "").replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+    return `${integer},${fraction}`;
+}
+
+/**
  * Formatea un decimal para inputs usando separador de miles (.) y coma decimal,
  * estilo es-VE. Ej.: "1234.5" -> "1.234,50" (con 2 decimales).
  */

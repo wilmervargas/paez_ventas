@@ -73,6 +73,7 @@ class CompraSerializer(serializers.ModelSerializer):
     adquirida_en = serializers.SerializerMethodField()
 
     moneda = serializers.CharField(required=False, allow_blank=True, max_length=3)
+    divisa = serializers.CharField(required=False, allow_blank=True, max_length=4)
     tasa_cambio = serializers.DecimalField(
         max_digits=18,
         decimal_places=6,
@@ -101,6 +102,7 @@ class CompraSerializer(serializers.ModelSerializer):
             "proveedor_codigo",
             "fecha",
             "moneda",
+            "divisa",
             "tasa_cambio",
             "subtotal",
             "otros_montos",
@@ -244,8 +246,8 @@ class CompraSerializer(serializers.ModelSerializer):
 
     def validate_moneda(self, value: str) -> str:
         value = (value or "").strip().upper()
-        if value and value not in {"VES", "USD", "EUR", "USDT"}:
-            raise serializers.ValidationError("La moneda debe ser VES, USD, EUR o USDT.")
+        if value and value not in {"VES", "USD", "EUR", "USDT", "AJU"}:
+            raise serializers.ValidationError("La moneda debe ser VES, USD, EUR, USDT o AJU.")
         return value
 
     def create(self, validated_data):

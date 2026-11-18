@@ -33,7 +33,7 @@ class Deuda(BaseModel):
         on_delete=models.PROTECT,
         related_name="deuda",
     )
-    moneda = models.CharField("moneda", max_length=3, default="USD")
+    moneda = models.CharField("moneda", max_length=10, default="USD")
     tasa_cambio = models.DecimalField(
         "tasa de cambio",
         max_digits=18,
@@ -42,6 +42,20 @@ class Deuda(BaseModel):
     )
     monto_original = models.DecimalField("monto original", max_digits=14, decimal_places=2)
     saldo = models.DecimalField("saldo", max_digits=14, decimal_places=2, default=Decimal("0.00"))
+    saldo_bs = models.DecimalField(
+        "saldo en bolívares",
+        max_digits=14,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        help_text="Saldo pendiente expresado en bolívares.",
+    )
+    saldo_base = models.DecimalField(
+        "saldo en divisa de la tasa",
+        max_digits=14,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        help_text="Saldo pendiente en la divisa usada en la tasa (USD, EUR o USDT).",
+    )
     tasa_bcv = models.DecimalField(
         "tasa BCV del documento",
         max_digits=18,
@@ -76,6 +90,20 @@ class Deuda(BaseModel):
     motivo_anulacion = models.TextField("motivo de anulación", blank=True)
     fecha_anulacion = models.DateTimeField("fecha de anulación", null=True, blank=True)
 
+    saldo_ves_actual = models.DecimalField(
+        "saldo en VES (actualizado)",
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Suma de equivalentes VES actualizados de cuotas pendientes/parciales.",
+    )
+    fecha_recalculo_tasa = models.DateTimeField(
+        "fecha de recálculo de tasa",
+        null=True,
+        blank=True,
+    )
+
     class Meta:
         verbose_name = "deuda"
         verbose_name_plural = "deudas"
@@ -100,7 +128,7 @@ class Deuda(BaseModel):
         errors = {}
         if self.tasa_cambio is not None and self.tasa_cambio <= 0:
             errors["tasa_cambio"] = "La tasa de cambio debe ser mayor que cero."
-        for campo in ("monto_original", "saldo"):
+        for campo in ("monto_original", "saldo", "saldo_bs", "saldo_base"):
             valor = getattr(self, campo)
             if valor is not None and valor < 0:
                 errors[campo] = "El monto no puede ser negativo."
@@ -135,6 +163,34 @@ class Cuota(BaseModel):
         choices=Estado.choices,
         default=Estado.PENDIENTE,
         db_index=True,
+    )
+
+    # Equivalente recalculado con tasa vigente (solo cobranza, no histórico)
+    monto_ves_actual = models.DecimalField(
+        "monto en VES (actualizado)",
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Equivalente en bolívares recalculado con la tasa vigente del día (solo cobranza).",
+    )
+    tasa_recalculo = models.DecimalField(
+        "tasa usada en recálculo",
+        max_digits=18,
+        decimal_places=6,
+        null=True,
+        blank=True,
+    )
+    tasa_tipo_recalculo = models.CharField(
+        "tipo de tasa del recálculo",
+        max_length=20,
+        null=True,
+        blank=True,
+    )
+    fecha_recalculo_tasa = models.DateTimeField(
+        "fecha de recálculo de tasa",
+        null=True,
+        blank=True,
     )
 
     class Meta:
@@ -191,7 +247,7 @@ class CajaSesion(BaseModel):
     monto_inicial = models.DecimalField(
         "monto inicial", max_digits=14, decimal_places=2, default=Decimal("0.00")
     )
-    moneda = models.CharField("moneda", max_length=3, default="USD")
+    moneda = models.CharField("moneda", max_length=10, default="USD")
     usuario_cierre = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         verbose_name="usuario de cierre",
@@ -242,7 +298,7 @@ class Pago(BaseModel):
         related_name="pagos",
     )
     fecha_pago = models.DateField("fecha de pago", default=timezone.localdate, db_index=True)
-    moneda = models.CharField("moneda", max_length=3, default="USD")
+    moneda = models.CharField("moneda", max_length=10, default="USD")
     tasa_cambio = models.DecimalField(
         "tasa de cambio",
         max_digits=18,
@@ -350,7 +406,7 @@ class MovimientoCaja(BaseModel):
     tipo = models.CharField("tipo", max_length=10, choices=Tipo.choices)
     concepto = models.CharField("concepto", max_length=255)
     monto = models.DecimalField("monto", max_digits=14, decimal_places=2)
-    moneda = models.CharField("moneda", max_length=3, default="USD")
+    moneda = models.CharField("moneda", max_length=10, default="USD")
     tasa_cambio = models.DecimalField(
         "tasa de cambio", max_digits=18, decimal_places=6, default=Decimal("1.000000")
     )

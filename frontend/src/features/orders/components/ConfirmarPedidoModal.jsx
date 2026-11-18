@@ -4,17 +4,20 @@ import { Alert } from "../../../components/ui/Alert";
 import { Button } from "../../../components/ui/Button";
 import { Modal } from "../../../components/ui/Modal";
 import { getErrorMessage } from "../../../lib/errors";
+import { formatEsVeInput, toApiDecimal } from "../../../lib/decimal";
 import { formatMoney } from "../../../lib/money";
 import { formatDate } from "../../../lib/dates";
 import { useConfirmarPedido } from "../hooks";
 
 function parseNum(v) {
   if (v === null || v === undefined || v === "") return 0;
-  const n = Number(String(v).replace(",", "."));
+  const n = Number(toApiDecimal(String(v)));
   return Number.isFinite(n) ? n : 0;
 }
+// Montos visibles siempre en formato es-VE: 1.234,56.
 function fmt(n) {
-  return (Number.isFinite(Number(n)) ? Number(n) : 0).toFixed(2).replace(".", ",");
+  const value = Number.isFinite(Number(n)) ? Number(n) : 0;
+  return formatEsVeInput(value.toFixed(2), 2) || "0,00";
 }
 function parseUsdTotal(pedido) {
   const v = pedido?.total_usd;

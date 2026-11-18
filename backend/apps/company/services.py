@@ -32,6 +32,8 @@ RATES_SYNC_TIMEOUT = getattr(settings, "RATES_SYNC_TIMEOUT", 10)
 
 # Monedas que el negocio cotiza a diario contra el bolÃ­var.
 MONEDAS_COTIZADAS = ("USD", "EUR", "USDT")
+# Monedas incluidas en el resumen/tarjetas (cotizaciones en Bs), incluyendo tasas manuales gestionadas.
+MONEDAS_RESUMEN = ("USD", "EUR", "USDT", "AJU")
 
 
 def get_empresa() -> Empresa | None:
@@ -109,6 +111,78 @@ def _tiene_tasa_del_dia(moneda, moneda_base, fecha):
 def _vigente_desde_para_fecha(fecha):
     """Datetime de vigencia: inicio del día en que entra en vigencia la tasa."""
     return timezone.make_aware(datetime.combine(fecha, time.min))
+
+
+def _tasa_usd_bcv_referencia(fecha):
+    """Tasa USD/BCV de referencia para la fecha (Ãºltima conocida hasta ese dÃ­a)."""
+    tasa = _ultima_tasa("VES", "USD", fecha)
+    if tasa is None:
+        return None
+    return tasa.tasa
+
+
+def asegurar_tasa_aju_del_dia(fecha):
+    """Garantiza la tasa AJU del dÃ­a.
+
+    - Si no existe ningÃºn registro AJU, la crea con el valor del dÃ³lar BCV de la fecha.
+    - Si ya existe histÃ³rico pero falta el dÃ­a, arrastra (copia) el Ãºltimo valor conocido
+      al inicio de la fecha, manteniÃ©ndose hasta que se modifique manualmente.
+    - Si ya hay registro del dÃ­a, no modifica nada.
+    Retorna: "creada", "arrastrada", "existente" u "omitida".
+    """
+    if fecha is None:
+        fecha = timezone.localdate()
+    if isinstance(fecha, datetime):
+        fecha = fecha.date()
+
+    if _tiene_tasa_del_dia("VES", "AJU", fecha):
+        return "existente"
+
+    ultima = _ultima_tasa("VES", "AJU", fecha)
+    if ultima is not None:
+        tasa_valor = Decimal(str(ultima.tasa)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        fuente = ultima.fuente or "ajustada"
+        estado = "arrastrada"
+    else:
+        tasa_ref = _tasa_usd_bcv_referencia(fecha)
+        if tasa_ref is None:
+            return "omitida"
+        tasa_valor = Decimal(str(tasa_ref)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        fuente = "ajustada"
+        estado = "creada"
+
+    if tasa_valor <= 0:
+        return "omitida"
+
+    vigente_desde = _vigente_desde_para_fecha(fecha)
+    try:
+        with transaction.atomic():
+            if _tiene_tasa_del_dia("VES", "AJU", fecha):
+                return "existente"
+            if TasaCambio.objects.filter(
+                moneda="VES", moneda_base="AJU", vigente_desde=vigente_desde
+            ).exists():
+                return "existente"
+            TasaCambio.objects.create(
+                moneda="VES",
+                moneda_base="AJU",
+                tasa=tasa_valor,
+                fuente=fuente,
+                vigente_desde=vigente_desde,
+            )
+        logger.info(
+            "Tasas: %s VES/AJU=%s fuente=%s fecha_vigencia=%s",
+            estado,
+            tasa_valor,
+            fuente,
+            fecha.isoformat(),
+        )
+        return estado
+    except IntegrityError:
+        return "existente"
+    except Exception:  # pragma: no cover
+        logger.exception("Tasas: no se pudo registrar VES/AJU")
+        return "omitida"
 
 
 def _fetch_json(url):
@@ -253,11 +327,11 @@ _auto_sync_intentado_fecha = None
 
 
 def asegurar_tasas_del_dia(fecha=None, forzar=False):
-    """Si faltan tasas del día (USD/EUR/USDT) para la fecha, intenta sincronizar.
+    """Si faltan tasas del día para la fecha, intenta sincronizarlas.
 
-    La actualización automática se ejecuta una sola vez por fecha: tras el primer
-    intento del día no se reintenta automáticamente, aunque la fuente aún no haya
-    publicado la tasa vigente o la consulta falle.
+    - USD/EUR/USDT: consulta fuentes externas (una vez por día en modo automático).
+    - AJU: se arrastra diariamente desde el valor del día anterior (o se crea desde
+      el dólar BCV si es la primera vez). Si el día ya fue modificado, se mantiene.
     """
     global _sync_hoy_en_curso, _auto_sync_intentado_fecha
     if fecha is None:
@@ -266,24 +340,39 @@ def asegurar_tasas_del_dia(fecha=None, forzar=False):
         fecha = fecha.date()
     hoy = timezone.localdate()
 
-    faltantes = [base for base in MONEDAS_COTIZADAS if not _tiene_tasa_del_dia("VES", base, fecha)]
-    if not faltantes or _sync_hoy_en_curso:
+    faltantes_ext = [base for base in MONEDAS_COTIZADAS if not _tiene_tasa_del_dia("VES", base, fecha)]
+    falta_aju = not _tiene_tasa_del_dia("VES", "AJU", fecha)
+    if not faltantes_ext and not falta_aju:
+        return None
+    if _sync_hoy_en_curso:
         return None
 
-    # Auto-sync: una sola vez por día/fecha. La sincronización manual (forzar) no se bloquea.
-    if not forzar and fecha == hoy and _auto_sync_intentado_fecha == hoy:
+    # Auto-sync de fuentes externas: una sola vez por día/fecha. El arrastre de AJU
+    # puede ejecutarse aunque el intento externo del día ya se haya realizado.
+    puede_sync_externo = bool(faltantes_ext) and (
+        forzar or fecha != hoy or _auto_sync_intentado_fecha != hoy
+    )
+    if not puede_sync_externo and not falta_aju:
         return None
 
     _sync_hoy_en_curso = True
     try:
-        resultado = sincronizar_tasas_externas(fecha)
-        if not forzar and fecha == hoy:
-            _auto_sync_intentado_fecha = hoy
+        resultado = None
+        if puede_sync_externo:
+            resultado = sincronizar_tasas_externas(fecha)
+            if not forzar and fecha == hoy:
+                _auto_sync_intentado_fecha = hoy
+        else:
+            resultado = {"fecha": fecha.isoformat(), "fuentes": []}
+
+        estado_aju = asegurar_tasa_aju_del_dia(fecha)
+        if isinstance(resultado, dict):
+            resultado["aju"] = estado_aju
         return resultado
     except Exception:
         logger.exception("Tasas: error inesperado en sincronización automática")
-        if not forzar and fecha == hoy:
-            # Intento automático realizado una sola vez, incluso si hubo error.
+        if not forzar and fecha == hoy and puede_sync_externo:
+            # Intento automático externo realizado una sola vez, incluso si hubo error.
             _auto_sync_intentado_fecha = hoy
         return None
     finally:
@@ -308,7 +397,7 @@ def get_tasa_del_dia(moneda="VES", fecha=None, base=None, auto_sync=True):
     moneda_base = (base or get_moneda_base()).strip().upper()
     if moneda == moneda_base:
         return None
-    if auto_sync and _es_fecha_hoy(fecha) and moneda == "VES" and moneda_base in MONEDAS_COTIZADAS:
+    if auto_sync and _es_fecha_hoy(fecha) and moneda == "VES" and moneda_base in MONEDAS_RESUMEN:
         if not _tiene_tasa_del_dia(moneda, moneda_base, fecha):
             asegurar_tasas_del_dia(fecha)
     directa = _ultima_tasa(moneda, moneda_base, fecha)
@@ -322,7 +411,7 @@ def get_tasa_vigente(moneda="VES", base=None):
     return get_tasa_del_dia(moneda, base=base)
 
 
-def get_resumen_tasas(fecha=None, monedas=MONEDAS_COTIZADAS, auto_sync=True):
+def get_resumen_tasas(fecha=None, monedas=MONEDAS_RESUMEN, auto_sync=True):
     """Última cotización en bolívares de cada moneda, para la fecha indicada.
 
     Incluye la fecha real de vigencia para distinguir la tasa del día de una
@@ -382,59 +471,49 @@ def upsert_empresa(data: dict, user=None) -> Empresa:
             setattr(empresa, field, value)
     empresa.save()
 
-    # Borra el archivo fÃ­sico si se quitÃ³ el logo o si se reemplazÃ³.
+    # Borra el archivo físico si se quitó el logo o si se reemplazó.
     delete_replaced_file(logo_previo, empresa.logo)
     return empresa
 
 
 def limpiar_base_datos(*, requested_by) -> dict[str, int]:
-    """Depura la base de datos conservando solo datos base/configuración.
+    """Depura la base de datos conservando datos base/configuración y terceros.
 
-    Conserva exclusivamente: Empresa, TasaCambio, CategoriaProducto, UnidadMedida
-    y todos los usuarios (incluyendo sus correos adicionales). Elimina el resto
-    de registros operativos/transaccionales y cualquier tabla vinculada a ellos.
-
-    El borrado se ejecuta paso a paso, en orden de dependencias (hijos antes que
-    padres), para respetar las FK con PROTECT y evitar conflictos de integridad.
+    Conserva: Empresa, TasaCambio, CategoriaProducto, UnidadMedida, clientes,
+    proveedores y todos los usuarios (incluyendo sus correos adicionales).
+    Elimina el resto de registros operativos/transaccionales (incluido inventario
+    y combos), pensado para periodo de prueba/arranque en limpio.
     """
-    if not getattr(requested_by, "is_superuser", False):
-        raise PermissionError("Solo los superusuarios pueden limpiar la base de datos.")
+    email = (getattr(requested_by, "email", "") or "").lower()
+    if email != "wilmere.vargas@gmail.com":
+        raise PermissionError("Solo el usuario autorizado puede limpiar la base de datos.")
 
     from django.apps import apps as django_apps
     from django.db import connection
 
-    from apps.clients.models import Cliente, Proveedor
     from apps.common.models import Secuencia
     from apps.finances.models import CajaSesion, Cuota, Deuda, MovimientoCaja, Pago, PagoAplicacion
     from apps.inventory.models import Combo, ComboProducto, MovimientoInventario, Producto
     from apps.orders.models import Pedido, PedidoDetalle
     from apps.purchases.models import Compra, CompraDetalle
 
-    # Pasos de limpieza transaccional, ordenados por dependencias (dependientes primero).
-    # Conservados: Empresa, TasaCambio, CategoriaProducto, UnidadMedida, User, UserEmailAdicional.
+    # Conservados: Empresa, TasaCambio, CategoriaProducto, UnidadMedida,
+    # Cliente, Proveedor, User, UserEmailAdicional.
     pasos = [
-        # 1) Finanzas/cobros: aplicaciones y movimientos dependen de pagos/cuotas/caja/deudas.
         ("aplicaciones_pago", PagoAplicacion.objects.all()),
         ("movimientos_caja", MovimientoCaja.objects.all()),
         ("pagos", Pago.objects.all()),
         ("cuotas", Cuota.objects.all()),
-        # 2) Pedidos y deudas: la deuda referencia al pedido (PROTECT), sus detalles y cuotas ya no existen.
         ("deudas", Deuda.objects.all()),
         ("detalles_pedido", PedidoDetalle.objects.all()),
         ("pedidos", Pedido.objects.all()),
-        # 3) Caja: ya sin pagos ni movimientos asociados.
         ("sesiones_caja", CajaSesion.objects.all()),
-        # 4) Compras: detalles antes de la cabecera.
         ("detalles_compra", CompraDetalle.objects.all()),
         ("compras", Compra.objects.all()),
-        # 5) Inventario/kardex y catálogo operativo (se conservan solo categorías y unidades).
         ("movimientos_inventario", MovimientoInventario.objects.all()),
         ("combo_productos", ComboProducto.objects.all()),
         ("combos", Combo.objects.all()),
         ("productos", Producto.objects.all()),
-        # 6) Terceros y numeración interna.
-        ("clientes", Cliente.objects.all()),
-        ("proveedores", Proveedor.objects.all()),
         ("secuencias", Secuencia.objects.all()),
     ]
 
@@ -446,7 +525,6 @@ def limpiar_base_datos(*, requested_by) -> dict[str, int]:
             count, _ = qs.delete()
             deleted[label] = count
 
-        # 7) Sesiones y tokens de autenticación (best-effort). No se eliminan usuarios.
         for app_label, model_name in [
             ("token_blacklist", "BlacklistedToken"),
             ("token_blacklist", "OutstandingToken"),
@@ -460,7 +538,6 @@ def limpiar_base_datos(*, requested_by) -> dict[str, int]:
             deleted[model._meta.db_table] = count
             tablas_limpiadas_completo.append(model._meta.db_table)
 
-    # Optimización post-limpieza (fuera de la transacción).
     if connection.vendor == "sqlite":
         optimizado = False
         try:
@@ -475,7 +552,6 @@ def limpiar_base_datos(*, requested_by) -> dict[str, int]:
         except Exception:
             logger.exception("Limpieza: no se pudo reiniciar sqlite_sequence")
 
-        # VACUUM requiere estar fuera de cualquier bloque transaccional.
         if not connection.in_atomic_block:
             try:
                 if not connection.get_autocommit():

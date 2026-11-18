@@ -25,12 +25,14 @@ const MONEDA_LABEL = {
   USD: "Dólar BCV",
   EUR: "Euro BCV",
   USDT: "USDT",
+  AJU: "Ajustada",
 };
 
 const FUENTE_LABEL = {
   bcv: "BCV",
   usdt: "USDT",
   manual: "Manual",
+  ajustada: "Ajustada",
 };
 
 function fuenteTone(fuente) {
@@ -39,6 +41,9 @@ function fuenteTone(fuente) {
   }
   if (fuente === "usdt") {
     return "warning";
+  }
+  if (fuente === "ajustada") {
+    return "success";
   }
   return "neutral";
 }
@@ -102,6 +107,7 @@ export function RatesManager() {
   const [editing, setEditing] = useState(undefined);
   const [borrando, setBorrando] = useState(null);
   const [syncMsg, setSyncMsg] = useState(null);
+  const [syncTone, setSyncTone] = useState("success");
   const resumen = useResumenTasas();
   const { data, isLoading, isError, error } = useTasas({
     page,
@@ -127,6 +133,7 @@ export function RatesManager() {
       // El error se muestra dentro del diálogo.
     }
   }
+
   const hayFiltros = moneda !== "todas" || fuente !== "todas" || Boolean(desde) || Boolean(hasta);
 
   function limpiarFiltros() {
@@ -142,7 +149,7 @@ export function RatesManager() {
       <PageHeader
         icon={ArrowRightLeft}
         title="Tasas de cambio"
-        description="Histórico diario del dólar BCV, el euro y el USDT. La última tasa registrada del día es la que aplica a compras y pedidos en bolívares."
+        description="Histórico diario del dólar BCV, el euro, el USDT y la tasa Ajustada (AJU). La última tasa registrada del día es la que aplica a compras y pedidos en bolívares."
         actions={
           puedeGestionar ? (
             <div className="flex flex-wrap gap-2">
@@ -150,10 +157,13 @@ export function RatesManager() {
                 variant="secondary"
                 onClick={async () => {
                   setSyncMsg(null);
+                  setSyncTone("success");
                   try {
                     const res = await syncTasas.mutateAsync();
+                    setSyncTone("success");
                     setSyncMsg(res?.detail || "Sincronización ejecutada.");
                   } catch (err) {
+                    setSyncTone("error");
                     setSyncMsg(getErrorMessage(err, "No se pudo sincronizar las tasas."));
                   }
                 }}
@@ -171,7 +181,7 @@ export function RatesManager() {
       />
 
       {syncMsg ? (
-        <Alert tone={syncTasas.isError ? "error" : "success"} onClose={() => setSyncMsg(null)}>
+        <Alert tone={syncTone} onClose={() => setSyncMsg(null)}>
           {syncMsg}
         </Alert>
       ) : null}
@@ -181,15 +191,15 @@ export function RatesManager() {
           {getErrorMessage(resumen.error, "No se pudo cargar el resumen de tasas.")}
         </Alert>
       ) : resumen.isLoading ? (
-        <div className="grid gap-4 sm:grid-cols-3">
-          {[0, 1, 2].map((item) => (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {[0, 1, 2, 3].map((item) => (
             <Card key={item} className="grid h-32 place-items-center p-5">
               <Spinner />
             </Card>
           ))}
         </div>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {(resumen.data?.monedas ?? []).map((fila) => (
             <TarjetaResumen key={fila.moneda} fila={fila} />
           ))}
@@ -210,6 +220,7 @@ export function RatesManager() {
             <option value="USD">Dólar (USD)</option>
             <option value="EUR">Euro (EUR)</option>
             <option value="USDT">USDT</option>
+            <option value="AJU">Ajustada (AJU)</option>
           </Select>
 
           <Select
@@ -224,6 +235,7 @@ export function RatesManager() {
             <option value="bcv">BCV</option>
             <option value="usdt">USDT / paralelo</option>
             <option value="manual">Manual</option>
+            <option value="ajustada">Ajustada</option>
           </Select>
 
           <Input
@@ -334,7 +346,7 @@ export function RatesManager() {
             description={
               hayFiltros
                 ? "No hay tasas que coincidan con los filtros seleccionados."
-                : "Registra la tasa del día del dólar BCV, el euro y el USDT para poder operar en bolívares."
+                : "Registra la tasa del día del dólar BCV, el euro, el USDT y la tasa Ajustada (AJU) para poder operar en bolívares."
             }
             action={
               hayFiltros ? (

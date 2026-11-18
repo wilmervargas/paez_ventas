@@ -1,13 +1,26 @@
 const currencyFormatters = new Map();
+const simbolos = {
+    VES: "Bs",
+    USD: "$",
+    EUR: "€",
+    USDT: "USDT",
+    AJU: "AJU",
+};
 function formatterFor(currency) {
     let formatter = currencyFormatters.get(currency);
-    if (!formatter) {
-        formatter = new Intl.NumberFormat("es-VE", {
-            style: "currency",
-            currency,
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-        });
+    if (formatter === undefined) {
+        try {
+            formatter = new Intl.NumberFormat("es-VE", {
+                style: "currency",
+                currency,
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+            });
+        }
+        catch {
+            // Monedas no ISO (p. ej. USDT): se muestran con símbolo manual.
+            formatter = null;
+        }
         currencyFormatters.set(currency, formatter);
     }
     return formatter;
@@ -37,13 +50,14 @@ export function formatMoney(value, currency = "USD") {
     if (!Number.isFinite(amount)) {
         return "—";
     }
-    return formatterFor(currency).format(amount);
+    const formatter = formatterFor(currency);
+    if (formatter) return formatter.format(amount);
+    const numero = new Intl.NumberFormat("es-VE", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    }).format(amount);
+    return `${simbolos[currency] ?? currency} ${numero}`;
 }
-const simbolos = {
-    VES: "Bs",
-    USD: "$",
-    EUR: "€",
-};
 /**
  * Formatea una tasa de cambio (precio de una moneda expresado en otra).
  * Se muestra siempre con 2 decimales en pantalla/tablas.

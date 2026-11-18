@@ -12,7 +12,7 @@ const TONES = {
     anulada: "neutral",
 };
 
-function describeTasaCompra(compra, tasaEur, tasaUsdt) {
+function describeTasaCompra(compra, tasaEur, tasaUsdt, tasaAju) {
     const tasaDoc = Number(compra.tasa_cambio || 0);
     const tasaBcv = Number(compra.tasa_bcv ?? 0);
     if (Number.isFinite(tasaBcv) && tasaBcv > 0 && Math.abs(tasaDoc - tasaBcv) < 0.000001) {
@@ -23,6 +23,9 @@ function describeTasaCompra(compra, tasaEur, tasaUsdt) {
     }
     if (tasaUsdt && Math.abs(tasaDoc - Number(tasaUsdt)) < 0.000001) {
         return `${formatRate(compra.tasa_cambio)} (USDT, por 1 USDT)`;
+    }
+    if (tasaAju && Math.abs(tasaDoc - Number(tasaAju)) < 0.000001) {
+        return `${formatRate(compra.tasa_cambio)} (Ajustada, por 1 AJU)`;
     }
     if (compra.moneda === "VES") {
         return `${formatRate(compra.tasa_cambio)} (Ajuste/Manual, Bs)`;
@@ -37,7 +40,8 @@ export function CompraDetailModal({ compra, onClose }) {
     const necesitaInferir = compra.moneda === "VES" && !coincideBcv;
     const tasaEurDoc = useTasaVigente("VES", "EUR", necesitaInferir ? compra.fecha : "");
     const tasaUsdtDoc = useTasaVigente("VES", "USDT", necesitaInferir ? compra.fecha : "");
-    const tasaLabel = describeTasaCompra(compra, tasaEurDoc.data?.tasa, tasaUsdtDoc.data?.tasa);
+    const tasaAjuDoc = useTasaVigente("VES", "AJU", necesitaInferir ? compra.fecha : "");
+    const tasaLabel = describeTasaCompra(compra, tasaEurDoc.data?.tasa, tasaUsdtDoc.data?.tasa, tasaAjuDoc.data?.tasa);
 
     return (<Modal open onClose={onClose} size="xl" title={`Compra ${compra.numero}`} description={`${compra.proveedor_codigo} · ${compra.proveedor_nombre}`} footer={<div className="flex justify-end">
           <Button type="button" variant="secondary" onClick={onClose} icon={<X className="h-4 w-4"/>}>

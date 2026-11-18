@@ -127,9 +127,16 @@ export function MovimientosTab({ productoInicial }) {
                     <td className="px-4 py-3 text-slate-600">{movimiento.motivo || "—"}</td>
                     <td className="px-4 py-3 text-slate-600">{movimiento.usuario || "Sistema"}</td>
                     {verCostos ? (<td className="px-4 py-3 text-slate-600">
-                        {movimiento.costo_unitario
-                        ? formatMoney(movimiento.costo_unitario, moneda)
-                        : "—"}
+                        {movimiento.costo_unitario ? (<>
+                          <p className="font-medium text-slate-700">
+                            {formatMoney(movimiento.costo_unitario, movimiento.moneda || moneda)}
+                          </p>
+                          {movimiento.costo_unitario_bs && Number(movimiento.costo_unitario_bs) > 0 ? (
+                            <p className="text-xs text-slate-500">
+                              {formatMoney(movimiento.costo_unitario_bs, "VES")}
+                            </p>
+                          ) : null}
+                        </>) : "—"}
                       </td>) : null}
                   </tr>))}
               </tbody>

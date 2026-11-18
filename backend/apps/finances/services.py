@@ -190,6 +190,23 @@ def _aplicar_a_cuotas(pago: Pago, deuda: Deuda, monto_aplicar: Decimal, user=Non
     return aplicaciones
 
 
+def saldos_en_bs_y_divisa(saldo, moneda: str, tasa_cambio) -> tuple[Decimal, Decimal]:
+    """Devuelve ``(saldo_bs, saldo_base)`` para un saldo en la moneda del documento.
+
+    - Documento en bolívares: la tasa son Bs por 1 divisa, así que el saldo en
+      la divisa de la tasa es ``saldo / tasa``.
+    - Documento en divisa: el saldo ya está en la divisa y su equivalente en Bs
+      es ``saldo * tasa``.
+    """
+    monto = money(saldo)
+    tasa = to_decimal(tasa_cambio)
+    if (moneda or "").upper() == "VES":
+        base = money(monto / tasa) if tasa > 0 else Decimal("0.00")
+        return monto, base
+    en_bs = money(monto * tasa) if tasa > 0 else Decimal("0.00")
+    return en_bs, monto
+
+
 def _recalcular_deuda(deuda: Deuda):
     deuda = Deuda.objects.select_for_update().get(pk=deuda.pk)
     if deuda.estado == Deuda.Estado.ANULADA:
@@ -201,8 +218,11 @@ def _recalcular_deuda(deuda: Deuda):
     if saldo < 0:
         saldo = Decimal("0.00")
     deuda.saldo = saldo
+    deuda.saldo_bs, deuda.saldo_base = saldos_en_bs_y_divisa(
+        saldo, deuda.moneda, deuda.tasa_cambio
+    )
     deuda.estado = Deuda.Estado.PAGADA if saldo <= 0 else Deuda.Estado.PENDIENTE
-    deuda.save(update_fields=["saldo", "estado", "updated_at"])
+    deuda.save(update_fields=["saldo", "saldo_bs", "saldo_base", "estado", "updated_at"])
     return deuda
 
 
@@ -239,7 +259,8 @@ def registrar_pago(data: dict, user=None) -> Pago:
     if metodo not in Pago.Metodo.values:
         raise BusinessRuleError("Método de pago inválido.")
 
-    # Caja: efectivo requiere sesión abierta
+    # Caja: si es efectivo, se asocia a la sesión abierta cuando exista.
+    # Si no hay caja abierta, el pago se registra igual y queda fuera del arqueo.
     caja_sesion = data.get("caja_sesion")
     if metodo == Pago.Metodo.EFECTIVO:
         if caja_sesion is None:
@@ -249,10 +270,8 @@ def registrar_pago(data: dict, user=None) -> Pago:
                 .order_by("-fecha_apertura")
                 .first()
             )
-        if caja_sesion is None or caja_sesion.estado != CajaSesion.Estado.ABIERTA:
-            raise BusinessRuleError(
-                "No hay una sesión de caja abierta para registrar un pago en efectivo."
-            )
+        elif caja_sesion.estado != CajaSesion.Estado.ABIERTA:
+            raise BusinessRuleError("La sesión de caja indicada no está abierta.")
     else:
         caja_sesion = None
 
@@ -266,23 +285,13 @@ def registrar_pago(data: dict, user=None) -> Pago:
     if tasa_usada_bs is not None:
         tasa_usada_bs = to_decimal(tasa_usada_bs)
 
-    # Validación de monto en Bs vs tasa (cuando se informa)
-    if monto_recibido_bs is not None and tasa_usada_bs is not None and tasa_usada_bs > 0:
-        # Equivalente esperado en Bs del monto que se abona en la moneda del pago/deuda
-        # Interpretación: tasa_usada_bs = Bs por 1 unidad de `moneda` del pago.
-        esperado_bs = money(to_decimal(monto) * to_decimal(tasa_usada_bs))
-        if to_decimal(monto_recibido_bs) + BS_TOLERANCE < esperado_bs:
-            raise BusinessRuleError(
-                f"Monto en Bs incompleto para la tasa seleccionada: "
-                f"esperado {esperado_bs} Bs, recibido {monto_recibido_bs} Bs."
-            )
-    elif monto_recibido_bs is not None and (tasa_usada_bs is None or tasa_usada_bs <= 0):
-        # Si dan Bs pero no tasa, no podemos validar estrictamente; se acepta
-        # el monto y se guarda sin tasa usada.
-        pass
+    # Nota: no se bloquea por diferencia de cálculo Bs/tasa (la tasa puede ajustarse manualmente).
+    # Se conserva el monto recibido y la tasa usada informados para referencia/auditoría.
 
-    # El monto a aplicar no puede exceder el saldo (salvo que se quiera
-    # dejar saldo a favor; aquí se limita al saldo pendiente).
+    aplicar_completo = bool(data.get("aplicar_completo"))
+    # Por defecto el monto aplicado es el del pago (limitado al saldo).
+    # Si la tasa de cobro se ajusta manualmente, se imputa como pago completo
+    # (aplicación = monto indicado, p.ej. saldo de la cuota), aunque el Bs recibido difiera.
     monto_aplicar = monto if monto <= deuda.saldo else money(deuda.saldo)
 
     monto_base = to_base(monto, tasa_cambio) if moneda != empresa.moneda_base else money(monto)

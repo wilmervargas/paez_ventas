@@ -6,6 +6,7 @@ import { Alert } from "../../../components/ui/Alert";
 import { formatDate } from "../../../lib/dates";
 import { getErrorMessage } from "../../../lib/errors";
 import { formatMoney, formatRate } from "../../../lib/money";
+import { useTasaVigente } from "../../orders/hooks";
 import { useDeuda } from "../hooks";
 
 function formatNumEs(value, decimals = 2) {
@@ -15,28 +16,32 @@ function formatNumEs(value, decimals = 2) {
   });
 }
 
-function montoUsdCuota(deuda, cuotaMonto) {
-  const monto = Number(cuotaMonto || 0);
-  const tasa = Number(deuda?.tasa_cambio || 0);
+function divisaContratada(deuda) {
+  if (deuda?.moneda === "USD") return "USD";
+  if (deuda?.moneda === "EUR") return "EUR";
+  if (deuda?.moneda === "USDT") return "USDT";
+  if (deuda?.moneda === "AJU") return "AJU";
+  // Para VES con tasa contratada (BCV USD/EUR/USDT/AJU), inferir por tasa_bcv cuando aplique
+  const tasaDoc = Number(deuda?.tasa_cambio || 0);
   const tasaBcv = Number(deuda?.tasa_bcv || 0);
-  if (deuda?.moneda === "USD") return `$ ${formatNumEs(monto)}`;
-  if (deuda?.moneda === "VES" && tasa > 0) {
-    const esUsdBcv = tasaBcv > 0 && Math.abs(tasa - tasaBcv) < 0.000001;
-    if (esUsdBcv || Number(deuda?.tasa_bcv) > 0) {
-      // Si la tasa del documento es BCV USD, el equivalente es directo; si no, se usa la tasa contratada como referencia USD base cuando aplique.
-      return `$ ${formatNumEs(monto / tasa)}`;
-    }
-  }
-  if ((deuda?.moneda === "EUR" || deuda?.moneda === "USDT") && tasa > 0) {
-    // En estos casos la tasa del documento se expresa en Bs por unidad; no hay USD directo sin cruce adicional.
-    return "—";
-  }
-  if (tasa > 0 && deuda?.moneda === "VES") return `$ ${formatNumEs(monto / tasa)}`;
-  return "—";
+  if (tasaBcv > 0 && Math.abs(tasaDoc - tasaBcv) < 0.000001) return "USD";
+  return "USD";
+}
+
+function montoEnDivisa(deuda, monto) {
+  const valor = Number(monto || 0);
+  const divisa = divisaContratada(deuda);
+  if (deuda?.moneda === "USD") return `${formatNumEs(valor)} ${divisa}`;
+  const tasa = Number(deuda?.tasa_cambio || 0);
+  if (!(tasa > 0)) return "—";
+  const eq = valor / tasa;
+  if (!Number.isFinite(eq)) return "—";
+  return `${formatNumEs(eq)} ${divisa}`;
 }
 
 export function DeudaDetailModal({ deudaId, onClose }) {
   const { data: deuda, isLoading, isError, error } = useDeuda(deudaId);
+  const tasaAjuHoy = useTasaVigente("VES", "AJU");
   const cuotaPendienteId =
     deuda?.proxima_cuota?.id ??
     deuda?.cuotas?.find((c) => Number(c.saldo || 0) > 0)?.id ??
@@ -46,8 +51,8 @@ export function DeudaDetailModal({ deudaId, onClose }) {
     <Modal
       open
       onClose={onClose}
-      title={deuda ? `Deuda · ${deuda.pedido_numero}` : "Detalle de deuda"}
-      description={deuda ? `${deuda.cliente_nombre} · Saldo ${formatMoney(deuda.saldo, deuda.moneda)}` : ""}
+      size="xl"
+      title="Detalle de deuda"
       footer={
         <div className="flex justify-end">
           <Button type="button" variant="secondary" onClick={onClose}>Cerrar</Button>
@@ -63,24 +68,33 @@ export function DeudaDetailModal({ deudaId, onClose }) {
           <div className="grid grid-cols-2 gap-3 rounded-xl border border-slate-200 p-3">
             <div><p className="text-slate-500">Cliente</p><p className="font-medium">{deuda.cliente_nombre} ({deuda.cliente_codigo})</p></div>
             <div><p className="text-slate-500">Pedido</p><p className="font-medium">{deuda.pedido_numero} · {formatDate(deuda.pedido_fecha)}</p></div>
-            <div><p className="text-slate-500">Total</p><p className="font-medium">{formatMoney(deuda.monto_original, deuda.moneda)}</p></div>
-            <div><p className="text-slate-500">Saldo</p><p className={`font-medium ${Number(deuda.saldo || 0) > 0 ? "italic" : ""}`}><strong>{formatMoney(deuda.saldo, deuda.moneda)}</strong></p></div>
-            <div><p className="text-slate-500">Pagado</p><p className="font-medium">{formatMoney(deuda.monto_pagado, deuda.moneda)}</p></div>
+            <div><p className="text-slate-500">Total</p><p className="font-medium">{montoEnDivisa(deuda, deuda.monto_original)}</p></div>
+            <div>
+              <p className="text-slate-500">Saldo</p>
+              <p className={`font-medium ${Number(deuda.saldo || 0) > 0 ? "italic" : ""}`}><strong>{montoEnDivisa(deuda, deuda.saldo)}</strong></p>
+            </div>
+            <div><p className="text-slate-500">Pagado</p><p className="font-medium">{montoEnDivisa(deuda, deuda.monto_pagado)}</p></div>
             <div><p className="text-slate-500">Estado</p><Badge tone={deuda.estado === "pagada" ? "success" : deuda.vencida ? "danger" : "warning"}>{deuda.estado_display}</Badge></div>
+            <div><p className="text-slate-500">Tasa del pedido (seleccionada)</p><p className="font-medium">{formatRate(deuda.tasa_cambio)} <span className="text-xs font-normal text-slate-500">({deuda.moneda})</span></p></div>
+            <div className="rounded-lg bg-rose-50/60 p-2">
+              <p className="text-rose-600">Tasa Ajustada (AJU) del día actual</p>
+              <p className="font-medium text-rose-700">
+                {tasaAjuHoy.data?.tasa ? `${formatRate(tasaAjuHoy.data.tasa)} por 1 AJU` : tasaAjuHoy.isLoading ? "Cargando..." : "No disponible"}
+              </p>
+            </div>
           </div>
 
           <div>
             <h4 className="mb-2 font-semibold text-slate-900">Plan de cuotas ({deuda.cuotas_total})</h4>
             {deuda.cuotas?.length ? (
               <div className="overflow-x-auto rounded-xl border border-slate-200">
-                <table className="w-full min-w-[620px] text-left text-sm">
+                <table className="w-full min-w-[560px] text-left text-sm">
                   <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                     <tr>
                       <th className="px-3 py-2">Cuota</th>
                       <th className="px-3 py-2">Fecha de cobro</th>
-                      <th className="px-3 py-2">Monto ({deuda.moneda})</th>
-                      <th className="px-3 py-2">Monto (USD)</th>
-                      <th className="px-3 py-2">Saldo (USD)</th>
+                      <th className="px-3 py-2">Monto</th>
+                      <th className="px-3 py-2">Saldo</th>
                       <th className="px-3 py-2">Estado</th>
                     </tr>
                   </thead>
@@ -92,9 +106,8 @@ export function DeudaDetailModal({ deudaId, onClose }) {
                         <tr key={c.id} className={pendientePorPagar ? "bg-amber-50/60" : undefined}>
                           <td className={`px-3 py-2 font-medium ${em}`}>#{c.numero}</td>
                           <td className={`px-3 py-2 ${em}`}>{formatDate(c.fecha_vencimiento)}</td>
-                          <td className={`px-3 py-2 ${em}`}>{formatMoney(c.monto, deuda.moneda)}</td>
-                          <td className={`px-3 py-2 ${em}`}>{montoUsdCuota(deuda, c.monto)}</td>
-                          <td className={`px-3 py-2 ${em}`}>{montoUsdCuota(deuda, c.saldo)}</td>
+                          <td className={`px-3 py-2 ${em}`}>{montoEnDivisa(deuda, c.monto)}</td>
+                          <td className={`px-3 py-2 ${em}`}>{montoEnDivisa(deuda, c.saldo)}</td>
                           <td className="px-3 py-2">
                             <div className="flex flex-wrap items-center gap-1.5">
                               <Badge tone={c.estado === "pagada" ? "success" : c.vencida ? "danger" : c.estado === "parcial" ? "info" : "warning"}>

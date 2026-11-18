@@ -30,7 +30,10 @@ export function DashboardPage() {
       const { data } = await api.post("/company/limpiar-base-datos/");
       await queryClient.invalidateQueries();
       setShowDbReset(false);
-      setDbResetSuccess(data?.detail || "Base de datos depurada correctamente. Se conservaron empresa, tasas de cambio y catálogos (categorías/unidades).");
+      setDbResetSuccess(
+        data?.detail ||
+          "Base de datos depurada correctamente. Se conservaron empresa, tasas de cambio, categorías, unidades, clientes, proveedores y usuarios."
+      );
     } catch (err) {
       setDbResetError(getErrorMessage(err, "No se pudo limpiar la base de datos."));
     } finally {
@@ -66,9 +69,10 @@ export function DashboardPage() {
           <CardBody className="space-y-4">
             {dbResetSuccess ? <Alert tone="success">{dbResetSuccess}</Alert> : null}
             <Alert tone="warning">
-              <strong>Limpiar base de datos:</strong> elimina todos los registros excepto{" "}
-              <strong>empresa</strong>, <strong>tasas de cambio</strong> y <strong>catálogos</strong>{" "}
-              (categorías y unidades). Se conserva tu usuario autorizado. Acción irreversible, pensada para depuración y arranque en limpio.
+              <strong>Limpiar base de datos:</strong> elimina los registros operativos/de prueba (incluidos{" "}
+              <strong>inventario</strong> y <strong>combos</strong>) y conserva <strong>empresa</strong>,{" "}
+              <strong>tasas de cambio</strong>, <strong>categorías</strong>, <strong>unidades</strong>,{" "}
+              <strong>clientes</strong>, <strong>proveedores</strong> y <strong>usuarios</strong>. Acción irreversible, pensada para depuración y arranque en limpio.
             </Alert>
             <div className="flex justify-end">
               <Button
@@ -90,7 +94,7 @@ export function DashboardPage() {
       <ConfirmDialog
         open={showDbReset}
         title="Limpiar base de datos"
-        message="¿Seguro que deseas limpiar la base de datos? Se eliminarán clientes, proveedores, productos/combos, inventario, compras, pedidos, finanzas (deudas, cuotas, pagos y caja), secuencias, sesiones y demás registros operativos, conservando solo empresa, tasas de cambio, categorías, unidades de medida y usuarios. Esta acción no se puede deshacer."
+        message="¿Seguro que deseas limpiar la base de datos? Se eliminarán productos/combos, inventario, compras, pedidos, finanzas (deudas, cuotas, pagos y caja), secuencias, sesiones y demás registros operativos, conservando empresa, tasas de cambio, categorías, unidades de medida, clientes, proveedores y usuarios. Esta acción no se puede deshacer."
         confirmLabel="Sí, limpiar base de datos"
         cancelLabel="Cancelar"
         loading={dbResetLoading}

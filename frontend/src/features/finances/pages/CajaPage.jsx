@@ -68,7 +68,7 @@ export function CajaPage() {
 
             {!sesion ? (
               <form onSubmit={onAbrir} className="space-y-3">
-                <p className="text-sm text-slate-600">No tienes una sesión de caja abierta. Debes abrirla para registrar cobros en efectivo.</p>
+                <p className="text-sm text-slate-600">No tienes una sesión de caja abierta. Ábrela para que los cobros en efectivo entren al arqueo; sin caja, los pagos se registran igual.</p>
                 <Input
                   label="Monto inicial"
                   type="text"

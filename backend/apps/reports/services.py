@@ -76,6 +76,7 @@ MONEDA_LABEL = {
     "VES": "Bolívar",
     "EUR": "Euro",
     "USDT": "USDT",
+    "AJU": "Ajustada",
 }
 
 
@@ -248,7 +249,7 @@ def _etiqueta_moneda_calculo(documento, cache_tasas: dict, fecha=None) -> str:
                 return "Dólar BCV"
 
         if fecha is not None:
-            for base, etiqueta in (("EUR", "Euro BCV"), ("USDT", "USDT")):
+            for base, etiqueta in (("EUR", "Euro BCV"), ("USDT", "USDT"), ("AJU", "Ajustada")):
                 key = (fecha, base)
                 if key not in cache_tasas:
                     try:
@@ -1031,7 +1032,10 @@ def build_movimientos(filtros: dict, user) -> dict:
     valor_salidas = Decimal("0.00")
 
     for movimiento in movimientos:
-        valor = money(movimiento.costo_unitario * movimiento.cantidad)
+        # El costo del movimiento se guarda en su divisa; los reportes consolidan
+        # siempre en moneda base. El respaldo cubre filas históricas sin moneda base.
+        costo_base = movimiento.costo_unitario_base or movimiento.costo_unitario
+        valor = money(costo_base * movimiento.cantidad)
         if movimiento.direccion == MovimientoInventario.Direccion.ENTRADA:
             entradas += 1
             valor_entradas += valor
@@ -1054,7 +1058,7 @@ def build_movimientos(filtros: dict, user) -> dict:
                 "tipo": movimiento.get_tipo_display(),
                 "direccion": movimiento.get_direccion_display(),
                 "cantidad": _qty(movimiento.cantidad),
-                "costo_unitario": _money(movimiento.costo_unitario),
+                "costo_unitario": _money(costo_base),
                 "valor": _money(valor),
                 "motivo": movimiento.motivo or "—",
                 "referencia": referencia or "—",

@@ -13,6 +13,7 @@ export function MensajePruebaModal({
     <Modal
       open={open}
       onClose={onClose}
+      size="xl"
       title={title}
       footer={
         <div className="flex justify-end">

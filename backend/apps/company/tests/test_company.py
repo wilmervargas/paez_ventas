@@ -372,11 +372,13 @@ def test_resumen_devuelve_dolar_euro_y_usdt(admin_client, empresa):
     assert response.status_code == 200
     assert response.data["fecha"] == hoy.isoformat()
     filas = {fila["moneda"]: fila for fila in response.data["monedas"]}
-    assert set(filas) == {"USD", "EUR", "USDT"}
+    assert {"USD", "EUR", "USDT", "AJU"}.issubset(set(filas))
     assert filas["USD"]["tasa"] == "40.000000"
     assert filas["EUR"]["tasa"] == "44.500000"
     assert filas["USDT"]["fuente"] == "usdt"
-    assert all(fila["es_del_dia"] for fila in filas.values())
+    assert filas["AJU"]["tasa"] == "40.000000"
+    assert filas["AJU"]["es_del_dia"] is True
+    assert all(fila["es_del_dia"] for fila in filas.values() if fila["moneda"] in {"USD", "EUR", "USDT", "AJU"})
 
 
 def test_resumen_marca_como_arrastrada_la_tasa_de_dias_anteriores(admin_client, empresa):

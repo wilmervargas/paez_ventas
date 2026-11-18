@@ -11,15 +11,15 @@ import { Select } from "../../../components/ui/Select";
 import { toApiDecimal, toDisplayDecimal } from "../../../lib/decimal";
 import { getErrorMessage } from "../../../lib/errors";
 import { useSaveTasa } from "../hooks";
-const MONEDAS = ["USD", "EUR", "USDT"];
+const MONEDAS = ["USD", "EUR", "USDT", "AJU"];
 const schema = z.object({
-    moneda_base: z.enum(["USD", "EUR", "USDT"]),
+    moneda_base: z.enum(["USD", "EUR", "USDT", "AJU"]),
     tasa: z
         .string()
         .trim()
         .regex(/^\d{1,12}([.,]\d{1,2})?$/, "Usa un número con hasta 2 decimales, por ejemplo 36,50")
         .refine((value) => Number(String(value).replace(",", ".")) > 0, "La tasa debe ser mayor que cero"),
-    fuente: z.enum(["bcv", "usdt", "manual"]),
+    fuente: z.enum(["bcv", "usdt", "manual", "ajustada"]),
     vigente_desde: z
         .string()
         .min(1, "Indica la fecha y hora")
@@ -48,8 +48,12 @@ function monedaDe(tasa) {
     return MONEDAS.includes(base) ? base : "USD";
 }
 function fuenteParaBase(base, fuenteActual) {
-    if (base === "USDT") return fuenteActual === "manual" ? "manual" : "usdt";
-    return fuenteActual === "manual" ? "manual" : "bcv";
+    if (fuenteActual === "manual" || fuenteActual === "ajustada") {
+        return fuenteActual;
+    }
+    if (base === "USDT") return "usdt";
+    if (base === "AJU") return "ajustada";
+    return "bcv";
 }
 function toDefaults(tasa, previas) {
     if (tasa) {
@@ -60,7 +64,7 @@ function toDefaults(tasa, previas) {
             vigente_desde: toLocalInput(tasa.vigente_desde),
         };
     }
-    const base = "USD";
+    const base = "EUR";
     const previa = Array.isArray(previas) ? previas.find((p) => p.moneda === base) : null;
     return {
         moneda_base: base,
@@ -91,11 +95,16 @@ export function TasaFormModal({ tasa, previas, onClose }) {
         const previa = Array.isArray(previas) ? previas.find((p) => p.moneda === monedaBase) : null;
         if (previa?.tasa) {
             setValue("tasa", toDisplayDecimal(previa.tasa, 2));
+        } else if (monedaBase === "AJU") {
+            // La primera vez que se crea AJU, toma el valor del dólar BCV.
+            const usd = Array.isArray(previas) ? previas.find((p) => p.moneda === "USD") : null;
+            setValue("tasa", usd?.tasa ? toDisplayDecimal(usd.tasa, 2) : "");
         } else {
             setValue("tasa", "");
         }
         const fuenteActual = getValues("fuente");
-        setValue("fuente", fuenteParaBase(monedaBase, previa?.fuente ?? fuenteActual));
+        const fuentePrevia = previa?.fuente ?? (monedaBase === "AJU" ? "ajustada" : fuenteActual);
+        setValue("fuente", fuenteParaBase(monedaBase, fuentePrevia));
     }, [monedaBase, tasa, previas, setValue, getValues]);
     const onSubmit = handleSubmit(async (values) => {
         setError(null);
@@ -137,14 +146,16 @@ export function TasaFormModal({ tasa, previas, onClose }) {
             <option value="USD">Dólar (USD)</option>
             <option value="EUR">Euro (EUR)</option>
             <option value="USDT">USDT</option>
+            <option value="AJU">Ajustada (AJU)</option>
           </Select>
 
           <Input label="Tasa (Bs por 1 unidad) *" inputMode="decimal" placeholder="36,50" error={errors.tasa?.message} {...register("tasa")}/>
 
           <Select label="Fuente *" error={errors.fuente?.message} {...register("fuente")}>
-            {monedaBase !== "USDT" ? <option value="bcv">BCV</option> : null}
+            {monedaBase !== "USDT" && monedaBase !== "AJU" ? <option value="bcv">BCV</option> : null}
             <option value="usdt">USDT / paralelo</option>
             <option value="manual">Manual</option>
+            <option value="ajustada">Ajustada</option>
           </Select>
 
           <Input label="Vigente desde *" type="datetime-local" error={errors.vigente_desde?.message} {...register("vigente_desde")}/>
@@ -156,7 +167,15 @@ export function TasaFormModal({ tasa, previas, onClose }) {
             1 {monedaBase} = {tasaValor || "0,00"} Bs
           </strong>{" "}
           con fuente{" "}
-          <strong>{fuente === "bcv" ? "BCV" : fuente === "usdt" ? "USDT" : "Manual"}</strong>.
+          <strong>
+            {fuente === "bcv"
+              ? "BCV"
+              : fuente === "usdt"
+                ? "USDT"
+                : fuente === "ajustada"
+                  ? "Ajustada"
+                  : "Manual"}
+          </strong>.
           Puedes registrar varias tasas el mismo día: aplica la última.
         </Alert>
       </form>

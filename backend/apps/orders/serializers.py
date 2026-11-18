@@ -296,8 +296,8 @@ class PedidoSerializer(serializers.ModelSerializer):
 
     def validate_moneda(self, value: str) -> str:
         value = (value or "").strip().upper()
-        if value and value not in {"VES", "USD", "EUR", "USDT"}:
-            raise serializers.ValidationError("La moneda debe ser VES, USD, EUR o USDT.")
+        if value and value not in {"VES", "USD", "EUR", "USDT", "AJU"}:
+            raise serializers.ValidationError("La moneda debe ser VES, USD, EUR, USDT o AJU.")
         return value
 
     def create(self, validated_data):

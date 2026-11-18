@@ -1,5 +1,5 @@
 ﻿import { useState } from "react";
-import { BarChart3, Banknote, Boxes, Building2, ChevronDown, LayoutDashboard, MessageCircle, Package, ShieldCheck, ShoppingCart, Truck, Users, Wallet, X } from "lucide-react";
+import { BarChart3, Boxes, Building2, ChevronDown, LayoutDashboard, MessageCircle, Package, ShieldCheck, ShoppingCart, Truck, Users, Wallet, X } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../../context/auth-context";
 import { useCompany } from "../../context/company-context";
@@ -74,7 +74,6 @@ const groups = [
                         to: "/app/reportes/cobranza",
                         roles: ["admin", "cobrador"],
                     },
-                    { label: "Caja", to: "/app/reportes/caja", roles: ["admin", "cobrador"] },
                     {
                         label: "Movimientos",
                         to: "/app/reportes/movimientos",

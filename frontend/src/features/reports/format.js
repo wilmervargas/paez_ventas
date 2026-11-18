@@ -6,6 +6,7 @@ const _MONEDA_LABEL = {
   VES: "Bolívar",
   EUR: "Euro",
   USDT: "USDT",
+  AJU: "Ajustada",
 };
 
 function numero(valor) {

@@ -9,36 +9,54 @@ import { Input } from "../../../components/ui/Input";
 import { Modal } from "../../../components/ui/Modal";
 import { Select } from "../../../components/ui/Select";
 import { TextArea } from "../../../components/ui/TextArea";
-import { useCompany } from "../../../context/company-context";
 import { formatDate } from "../../../lib/dates";
 import {
   addDecimals,
   divideDecimals,
+  formatEsVeInput,
   multiplyDecimals,
-  percentOf,
   subtractDecimals,
   toApiDecimal,
-  toDisplayDecimal,
 } from "../../../lib/decimal";
 import { getErrorMessage } from "../../../lib/errors";
 import { formatMoney, formatRate } from "../../../lib/money";
 import { useSavePedido, useTasaVigente } from "../hooks";
 
-const MODO_LABEL = { usd_bcv: "Dólar BCV", eur_bcv: "Euro BCV", usdt: "USDT", ajuste: "Ajuste (Bs)" };
+const MODO_LABEL = { usd_bcv: "Dólar BCV", eur_bcv: "Euro BCV", usdt: "USDT", aju: "Ajustada (AJU)", ajuste: "Ajuste (Bs)" };
 const rateOptions = { shouldDirty: false, shouldValidate: true };
 
-const monto = z.string().trim().regex(/^\d{1,12}([.,]\d{1,2})?$/, "Usa un monto con hasta 2 decimales");
-const cantidad = z
-  .string()
-  .trim()
-  .regex(/^\d{1,11}([.,]\d{1,3})?$/, "Usa una cantidad con hasta 3 decimales")
-  .refine((value) => !/^0+(?:[.,]0+)?$/.test(value), "La cantidad debe ser mayor que cero");
+// Valida números escritos en formato es-VE (1.234,56) o API (1234.56).
+function esDecimalValido(value, maxDecimals) {
+  const raw = String(value ?? "").trim();
+  if (!raw || !/^[\d.,]+$/.test(raw)) return false;
+  const api = toApiDecimal(raw);
+  if (!api) return false;
+  const [integer, fraction = ""] = api.split(".");
+  return integer.length <= 12 && fraction.length <= maxDecimals;
+}
+function decimalField(maxDecimals, message) {
+  return z.string().trim().superRefine((value, ctx) => {
+    if (!esDecimalValido(value, maxDecimals)) {
+      ctx.addIssue({ code: "custom", message });
+    }
+  });
+}
+const monto = decimalField(2, "Usa un monto con hasta 2 decimales");
+const cantidad = decimalField(3, "Usa una cantidad con hasta 3 decimales").refine(
+  (value) => Number(toApiDecimal(value)) > 0,
+  "La cantidad debe ser mayor que cero",
+);
 const tasa = z
   .string()
   .trim()
   .min(1, "Indica la tasa")
-  .regex(/^\d{1,12}([.,]\d{1,6})?$/, "Usa una tasa con hasta 6 decimales")
-  .refine((value) => Number(String(value).replace(",", ".")) > 0, "La tasa debe ser mayor que cero");
+  .superRefine((value, ctx) => {
+    if (!esDecimalValido(value, 6)) {
+      ctx.addIssue({ code: "custom", message: "Usa una tasa con hasta 6 decimales" });
+    } else if (!(Number(toApiDecimal(value)) > 0)) {
+      ctx.addIssue({ code: "custom", message: "La tasa debe ser mayor que cero" });
+    }
+  });
 
 const schema = z
   .object({
@@ -47,7 +65,7 @@ const schema = z
     numero_referencia: z.string().max(50),
     tipo_pago: z.enum(["contado", "credito"]),
     numero_cuotas: z.coerce.number().int().min(1).max(10),
-    modo_tasa: z.enum(["usd_bcv", "eur_bcv", "usdt", "ajuste"]),
+    modo_tasa: z.enum(["usd_bcv", "eur_bcv", "usdt", "aju", "ajuste"]),
     tasa_monto: tasa,
     descuento: monto,
     otros_montos: monto,
@@ -87,41 +105,39 @@ function baseDivisa(modo) {
   if (modo === "usd_bcv") return "USD";
   if (modo === "eur_bcv") return "EUR";
   if (modo === "usdt") return "USDT";
+  if (modo === "aju") return "AJU";
   return "USD";
 }
 function parseRate(value) {
-  const n = Number(String(value ?? "").replace(",", "."));
+  const n = Number(toApiDecimal(String(value ?? "")));
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 function formatRateInput(value) {
   const n = parseRate(value);
-  return n > 0 ? toDisplayDecimal(String(n), 2) : "";
+  return n > 0 ? formatEsVeInput(toApiDecimal(String(n), 2), 2) : "";
 }
 function bsToDivisa2(bs, tasa) {
   const t = Number(tasa || 0);
   if (!Number.isFinite(t) || t <= 0) return "0,00";
-  return divideDecimals(bs ?? "0", String(t), 2);
-}
-function divisaToBs2(value, tasa) {
-  const t = Number(tasa || 0);
-  if (!Number.isFinite(t) || t <= 0) return "0,00";
-  return multiplyDecimals(value ?? "0", String(t), 2);
+  return formatEsVeInput(divideDecimals(bs ?? "0", String(t), 2), 2);
 }
 function lineaToDefault(linea, toDivisa2) {
-  const desc = toDivisa2 ? toDivisa2(linea?.descuento_linea ?? "0") : toDisplayDecimal(linea?.descuento_linea ?? "0", 2);
+  const desc = toDivisa2
+    ? toDivisa2(linea?.descuento_linea ?? "0")
+    : formatEsVeInput(linea?.descuento_linea ?? "0", 2);
   const precio = toDivisa2
     ? linea?.precio_unitario
       ? toDivisa2(linea.precio_unitario)
       : ""
     : linea?.precio_unitario
-      ? toDisplayDecimal(linea.precio_unitario, 2)
+      ? formatEsVeInput(linea.precio_unitario, 2)
       : "";
   if (linea?.combo) {
     return {
       tipo_item: "combo",
       producto: "",
       combo: String(linea.combo),
-      cantidad: toDisplayDecimal(linea.cantidad, 2),
+      cantidad: formatEsVeInput(linea.cantidad, 2),
       precio_unitario: precio,
       descuento_linea: desc,
       aplica_iva: false,
@@ -131,7 +147,7 @@ function lineaToDefault(linea, toDivisa2) {
     tipo_item: "producto",
     producto: linea?.producto ? String(linea.producto) : "",
     combo: "",
-    cantidad: toDisplayDecimal(linea?.cantidad ?? "1", 2),
+    cantidad: formatEsVeInput(linea?.cantidad ?? "1", 2),
     precio_unitario: precio,
     descuento_linea: desc,
     aplica_iva: false,
@@ -144,12 +160,12 @@ function toDefaults(pedido) {
     const tasaBcv = pedido.tasa_bcv ?? null;
     const mismaQueBcv =
       tasaBcv != null && Math.abs(Number(tasaDoc) - Number(tasaBcv)) < 0.000001;
-    // Modo inicial tentativo; si no coincide con BCV conocido se infiere luego (EUR/USDT) o queda como ajuste/manual.
+    // Modo inicial tentativo; si no coincide con BCV conocido se infiere luego (EUR/USDT/AJU) o queda como ajuste/manual.
     const modoInicial = esVes && mismaQueBcv ? "usd_bcv" : esVes ? "ajuste" : "usd_bcv";
     // Montos guardados en Bs: se expresan en base de la tasa seleccionada (base * tasa = Bs), sin alterarlos en ediciones manuales posteriores.
     const toBase2 = (bs) => bsToDivisa2(bs, tasaDoc);
-    const tipoPago = pedido.tipo_pago || "contado";
-    const cuotas = tipoPago === "contado" ? 1 : Math.max(1, Math.min(10, Number(pedido.numero_cuotas || 1)));
+    const tipoPago = "credito";
+    const cuotas = Math.max(1, Math.min(10, Number(pedido.numero_cuotas || 8)));
     const sumDescLineas = (pedido.lineas || []).reduce(
       (acc, l) => acc + Number(l.descuento_linea || 0),
       0,
@@ -174,8 +190,8 @@ function toDefaults(pedido) {
     fecha: todayISO(),
     numero_referencia: "",
     tipo_pago: "credito",
-    numero_cuotas: 1,
-    modo_tasa: "usd_bcv",
+    numero_cuotas: 8,
+    modo_tasa: "eur_bcv",
     tasa_monto: "",
     descuento: "0,00",
     otros_montos: "0,00",
@@ -185,8 +201,6 @@ function toDefaults(pedido) {
 }
 
 export function PedidoFormModal({ pedido, clientes, productos, combos, onClose }) {
-  const { company } = useCompany();
-  const ivaRate = company?.iva_rate ?? "0.00";
   const [error, setError] = useState(null);
   const coincideBcvInicial = Boolean(
     pedido &&
@@ -205,7 +219,7 @@ export function PedidoFormModal({ pedido, clientes, productos, combos, onClose }
     !pedido || (Boolean(pedido?.tasa_cambio) && parseRate(pedido?.tasa_cambio) > 0)
   );
   const prevModoRef = useRef(null);
-  const lastTasaDivisaRef = useRef({ usd_bcv: 0, eur_bcv: 0, usdt: 0 });
+  const lastTasaDivisaRef = useRef({ usd_bcv: 0, eur_bcv: 0, usdt: 0, aju: 0 });
   const mutation = useSavePedido();
 
   const {
@@ -213,7 +227,6 @@ export function PedidoFormModal({ pedido, clientes, productos, combos, onClose }
     control,
     handleSubmit,
     setValue,
-    getValues,
     formState: { errors, isSubmitting },
   } = useForm({
     resolver: zodResolver(schema),
@@ -221,6 +234,17 @@ export function PedidoFormModal({ pedido, clientes, productos, combos, onClose }
   });
 
   const { fields, append, remove } = useFieldArray({ control, name: "detalles" });
+
+  // Al salir del campo, deja el monto en formato es-VE (miles con punto y coma decimal).
+  function formatMontoOnBlur(name) {
+    return (event) => {
+      const formatted = formatEsVeInput(event.target.value, 2);
+      if (formatted && formatted !== event.target.value) {
+        setValue(name, formatted, { shouldDirty: true, shouldValidate: true });
+      }
+    };
+  }
+
   const modoTasa = useWatch({ control, name: "modo_tasa" }) ?? "usd_bcv";
   const fecha = useWatch({ control, name: "fecha" }) ?? "";
   const tipoPago = useWatch({ control, name: "tipo_pago" }) ?? "contado";
@@ -231,10 +255,8 @@ export function PedidoFormModal({ pedido, clientes, productos, combos, onClose }
   const esAjuste = modoTasa === "ajuste";
 
   useEffect(() => {
-    if (tipoPago === "contado") {
-      setValue("numero_cuotas", 1, { shouldValidate: true });
-    }
-  }, [tipoPago, setValue]);
+    setValue("tipo_pago", "credito", { shouldValidate: true });
+  }, [setValue]);
 
   const divisa = baseDivisa(modoTasa);
   // Misma rutina de Tasa / moneda de cálculo que Compras: tasa vigente según fecha (BCV/EUR/USDT) o Ajuste manual.
@@ -244,6 +266,7 @@ export function PedidoFormModal({ pedido, clientes, productos, combos, onClose }
   const debeInferirModo = Boolean(pedido && pedido.moneda === "VES" && !coincideBcvInicial);
   const tasaEurDoc = useTasaVigente("VES", "EUR", fechaDoc);
   const tasaUsdtDoc = useTasaVigente("VES", "USDT", fechaDoc);
+  const tasaAjuDoc = useTasaVigente("VES", "AJU", fechaDoc);
 
   useEffect(() => {
     if (!debeInferirModo || modoInferido) return;
@@ -261,6 +284,7 @@ export function PedidoFormModal({ pedido, clientes, productos, combos, onClose }
     }
     const eur = tasaEurDoc.data?.tasa;
     const usdt = tasaUsdtDoc.data?.tasa;
+    const aju = tasaAjuDoc.data?.tasa;
     if (eur && Math.abs(tasaDocNum - Number(eur)) < 0.000001) {
       setValue("modo_tasa", "eur_bcv", { shouldDirty: false, shouldValidate: true });
       setModoInferido(true);
@@ -271,8 +295,13 @@ export function PedidoFormModal({ pedido, clientes, productos, combos, onClose }
       setModoInferido(true);
       return;
     }
-    if (tasaEurDoc.isFetched && tasaUsdtDoc.isFetched) {
-      // Tasa distinta a BCV/EUR/USDT: se mantiene como Ajuste (tasa manual base de cálculo).
+    if (aju && Math.abs(tasaDocNum - Number(aju)) < 0.000001) {
+      setValue("modo_tasa", "aju", { shouldDirty: false, shouldValidate: true });
+      setModoInferido(true);
+      return;
+    }
+    if (tasaEurDoc.isFetched && tasaUsdtDoc.isFetched && tasaAjuDoc.isFetched) {
+      // Tasa distinta a BCV/EUR/USDT/AJU: se mantiene como Ajuste (tasa manual base de cálculo).
       setModoInferido(true);
       setMontosConvertidos(true);
     }
@@ -284,6 +313,8 @@ export function PedidoFormModal({ pedido, clientes, productos, combos, onClose }
     tasaEurDoc.isFetched,
     tasaUsdtDoc.data,
     tasaUsdtDoc.isFetched,
+    tasaAjuDoc.data,
+    tasaAjuDoc.isFetched,
     setValue,
   ]);
 
@@ -363,10 +394,10 @@ export function PedidoFormModal({ pedido, clientes, productos, combos, onClose }
     setValue,
   ]);
 
-  // Al editar: inferencia de modo EUR/USDT (sin alterar precios/montos ingresados).
+  // Al editar: inferencia de modo EUR/USDT/AJU (sin alterar precios/montos ingresados).
   useEffect(() => {
     if (!pedido || montosConvertidos || !modoInferido) return;
-    if (modoTasa === "eur_bcv" || modoTasa === "usdt" || esAjuste) {
+    if (modoTasa === "eur_bcv" || modoTasa === "usdt" || modoTasa === "aju" || esAjuste) {
       const t = parseRate(tasaMonto) || parseRate(pedido.tasa_cambio);
       if (t > 0 && !esAjuste) lastTasaDivisaRef.current[modoTasa] = t;
       setMontosConvertidos(true);
@@ -387,23 +418,27 @@ export function PedidoFormModal({ pedido, clientes, productos, combos, onClose }
     const brutoBase = multiplyDecimals(d.cantidad, precioBase, 2);
     const baseLinea = subtractDecimals(brutoBase, d.descuento_linea || "0", 2);
     const baseLineaBs = montoBaseEnBs ? multiplyDecimals(baseLinea, String(factor), 2) : "0,00";
-    const ivaLineaBs = d.aplica_iva !== false && montoBaseEnBs ? percentOf(baseLineaBs, ivaRate, 2) : "0,00";
-    return { baseLineaBs, ivaLineaBs };
+    return { brutoBase, baseLineaBs };
   });
   const subtotalLineasBs = montoBaseEnBs ? addDecimals(lineasCalc.map((l) => l.baseLineaBs), 2) : "0,00";
-  const ivaEstimadoBs = montoBaseEnBs ? addDecimals(lineasCalc.map((l) => l.ivaLineaBs), 2) : "0,00";
   const descuentoBs = montoBaseEnBs ? multiplyDecimals(descuento || "0,00", String(factor), 2) : "0,00";
   const otrosMontosBs = montoBaseEnBs ? multiplyDecimals(otrosMontos || "0,00", String(factor), 2) : "0,00";
   const totalEstimadoBs = montoBaseEnBs
-    ? subtractDecimals(addDecimals([subtotalLineasBs, ivaEstimadoBs, otrosMontosBs], 2), descuentoBs, 2)
+    ? subtractDecimals(addDecimals([subtotalLineasBs, otrosMontosBs], 2), descuentoBs, 2)
     : "0,00";
+  // Total en divisas: sumatoria de (cantidad * precio unitario), sin IVA ni descuentos/otros.
+  // Total (Bs) de esta sumatoria = sumaBrutoBase * tasa seleccionada.
+  const sumaBrutoBase = addDecimals(lineasCalc.map((l) => l.brutoBase), 2);
+  const totalDivisasBs = montoBaseEnBs ? multiplyDecimals(sumaBrutoBase, String(factor), 2) : "0,00";
+  const monedaDivisa = esAjuste ? "USD" : divisa;
+  const totalEstimadoDivisa = montoBaseEnBs ? sumaBrutoBase : null;
   const sinTasaDelDia = !esAjuste && tasaQuery.isFetched && !tasaDia;
   const sinTasaAjuste = esAjuste && !(tasaNum > 0);
   const etiquetaUnidadMonto = esAjuste ? "base" : divisa;
 
   const onSubmit = handleSubmit(async (values) => {
     setError(null);
-    const norm = (v, dp = 2) => toApiDecimal(v, dp);
+    const norm = (v, dp = 2) => toApiDecimal(formatEsVeInput(v, 2) || v, dp);
     const t = parseRate(values.tasa_monto);
     if (!(t > 0)) {
       setError(
@@ -419,8 +454,8 @@ export function PedidoFormModal({ pedido, clientes, productos, combos, onClose }
       cliente: Number(values.cliente),
       fecha: values.fecha,
       numero_referencia: values.numero_referencia?.trim() || "",
-      tipo_pago: values.tipo_pago,
-      numero_cuotas: values.tipo_pago === "contado" ? 1 : Number(values.numero_cuotas || 1),
+      tipo_pago: "credito",
+      numero_cuotas: Number(values.numero_cuotas || 1),
       moneda: "VES",
       // La tasa seleccionada (BCV/EUR/USDT o Ajuste) es la base del cálculo; no se alteran precios/montos ingresados.
       tasa_cambio: norm(values.tasa_monto, 6),
@@ -431,7 +466,7 @@ export function PedidoFormModal({ pedido, clientes, productos, combos, onClose }
         const base = {
           cantidad: norm(d.cantidad, 3),
           descuento_linea: toBs2(d.descuento_linea),
-          aplica_iva: Boolean(d.aplica_iva),
+          aplica_iva: false,
         };
         if (d.tipo_item === "combo") base.combo = Number(d.combo);
         else base.producto = Number(d.producto);
@@ -454,7 +489,25 @@ export function PedidoFormModal({ pedido, clientes, productos, combos, onClose }
   return (
     <Modal open onClose={onClose} size="xl" title={pedido ? `Editar ${pedido.numero}` : "Nuevo pedido"}
       description="Selecciona la tasa del registro del día (o Ajuste). La tasa es la base del cálculo en Bs (VES). Los precios/montos del pedido (incluido el combo) no se alteran automáticamente al cambiar la tasa/modo/fecha."
-      footer={<div className="flex flex-wrap items-center justify-between gap-3"><p className="text-sm text-slate-600">Total (Bs): <span className="font-bold text-slate-900">{formatMoney(totalEstimadoBs, "VES")}</span></p><div className="flex gap-2"><Button type="button" variant="secondary" onClick={onClose}>Cancelar</Button><Button type="submit" form="pedido-form" loading={isSubmitting} icon={<Save className="h-4 w-4" />}>Guardar borrador</Button></div></div>}>
+      footer={
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-600">
+            <p>
+              Total (Bs): <span className="font-bold text-slate-900">{formatMoney(totalEstimadoBs, "VES")}</span>
+            </p>
+            <p>
+              Total ({monedaDivisa}):{" "}
+              <span className="font-bold text-slate-900">
+                {totalEstimadoDivisa != null ? formatMoney(totalEstimadoDivisa, monedaDivisa) : "—"}
+              </span>
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button type="button" variant="secondary" onClick={onClose}>Cancelar</Button>
+            <Button type="submit" form="pedido-form" loading={isSubmitting} icon={<Save className="h-4 w-4" />}>Guardar borrador</Button>
+          </div>
+        </div>
+      }>
       {error ? <Alert tone="error" className="mb-5">{error}</Alert> : null}
       <form id="pedido-form" onSubmit={onSubmit} className="space-y-5" noValidate>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -474,10 +527,8 @@ export function PedidoFormModal({ pedido, clientes, productos, combos, onClose }
           />
           <Input label="Número de pedido" placeholder="Referencia del cliente/pedido" error={errors.numero_referencia?.message} {...register("numero_referencia")} />
           <div className="grid grid-cols-2 gap-3">
-            <Select label="Tipo de pago *" error={errors.tipo_pago?.message} {...register("tipo_pago")}>
-              <option value="credito">Crédito</option>
-              <option value="contado">Contado</option>
-            </Select>
+            <input type="hidden" {...register("tipo_pago")} />
+            <Input label="Tipo de pago" value="Crédito" disabled readOnly />
             <Select
               label="Cuotas *"
               error={errors.numero_cuotas?.message}
@@ -502,16 +553,16 @@ export function PedidoFormModal({ pedido, clientes, productos, combos, onClose }
             <option value="usd_bcv">Dólar BCV</option>
             <option value="eur_bcv">Euro BCV</option>
             <option value="usdt">USDT</option>
-            <option value="ajuste">Ajuste</option>
+            <option value="aju">Ajustada (AJU)</option>
           </Select>
           <div className="sm:col-span-1 xl:col-span-3">
             {esAjuste ? (
               <Input
                 label="Tasa ajustada (Bs) *"
                 inputMode="decimal"
-                hint="Modo Ajuste: ingresa manualmente la tasa que será la base del cálculo (igual que las tasas BCV/USDT en los otros modos)."
+                hint="Modo Ajuste: ingresa manualmente la tasa que será la base del cálculo (igual que las tasas BCV/USDT/AJU en los otros modos)."
                 error={errors.tasa_monto?.message}
-                {...register("tasa_monto")}
+                {...register("tasa_monto", { onBlur: formatMontoOnBlur("tasa_monto") })}
               />
             ) : (
               <Input
@@ -541,14 +592,13 @@ export function PedidoFormModal({ pedido, clientes, productos, combos, onClose }
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Input label={`Descuento global (${etiquetaUnidadMonto})`} inputMode="decimal" error={errors.descuento?.message} {...register("descuento")} />
-          <Input label={`Otros montos (${etiquetaUnidadMonto})`} inputMode="decimal" hint="Monto adicional sin IVA; se suma al total." error={errors.otros_montos?.message} {...register("otros_montos")} />
+          <Input label={`Descuento global (${etiquetaUnidadMonto})`} inputMode="decimal" error={errors.descuento?.message} {...register("descuento", { onBlur: formatMontoOnBlur("descuento") })} />
+          <Input label={`Otros montos (${etiquetaUnidadMonto})`} inputMode="decimal" hint="Monto adicional; se suma al total." error={errors.otros_montos?.message} {...register("otros_montos", { onBlur: formatMontoOnBlur("otros_montos") })} />
           <div className="sm:col-span-2 rounded-xl border border-slate-200 p-3 text-sm text-slate-600">
             <p>Subtotal líneas (Bs): <strong>{formatMoney(subtotalLineasBs, "VES")}</strong></p>
-            <p className="mt-1">IVA estimado (Bs): <strong>{formatMoney(ivaEstimadoBs, "VES")}</strong></p>
             <p className="mt-1">Otros montos (Bs): <strong>{formatMoney(otrosMontosBs, "VES")}</strong></p>
             {factor > 0 ? <p className="mt-1 text-xs text-slate-500">Tasa aplicada (base de cálculo): {formatRate(String(factor))} Bs</p> : null}
-            <p className="mt-2 text-xs text-slate-500">La tasa seleccionada es la base del cálculo; los precios/montos no se alteran automáticamente. El backend recalcula IVA (solo ítems marcados), totales y congela precios/costos.</p>
+            <p className="mt-2 text-xs text-slate-500">La tasa seleccionada es la base del cálculo; los precios/montos no se alteran automáticamente. No se calcula IVA en los pedidos. El backend recalcula totales y congela precios/costos.</p>
           </div>
         </div>
 
@@ -565,7 +615,6 @@ export function PedidoFormModal({ pedido, clientes, productos, combos, onClose }
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-4">
             <div>
               <p className="text-sm font-semibold text-slate-900">Líneas del pedido</p>
-              <p className="text-xs text-slate-500">Montos en {etiquetaUnidadMonto}. La tasa seleccionada es la base del cálculo (totales en Bs). Los precios no se alteran automáticamente, solo si los cambias manualmente.</p>
             </div>
             <Button type="button" variant="secondary" className="px-2.5 py-1.5 text-xs" onClick={() => append({ tipo_item: "combo", producto: "", combo: "", cantidad: "1,00", precio_unitario: "", descuento_linea: "0,00", aplica_iva: false })} icon={<Plus className="h-3.5 w-3.5" />}>Agregar línea</Button>
           </div>
@@ -598,7 +647,7 @@ export function PedidoFormModal({ pedido, clientes, productos, combos, onClose }
                         {...register(`detalles.${index}.combo`, {
                           onChange: (e) => {
                             const c = combos.find((x) => String(x.id) === e.target.value);
-                            if (c) setValue(`detalles.${index}.precio_unitario`, toDisplayDecimal(c.precio, 2), { shouldDirty: true, shouldValidate: true });
+                            if (c) setValue(`detalles.${index}.precio_unitario`, formatEsVeInput(c.precio, 2), { shouldDirty: true, shouldValidate: true });
                           },
                         })}
                       >
@@ -612,7 +661,7 @@ export function PedidoFormModal({ pedido, clientes, productos, combos, onClose }
                         {...register(`detalles.${index}.producto`, {
                           onChange: (e) => {
                             const p = productos.find((x) => String(x.id) === e.target.value);
-                            if (p) setValue(`detalles.${index}.precio_unitario`, toDisplayDecimal(p.precio, 2), { shouldDirty: true, shouldValidate: true });
+                            if (p) setValue(`detalles.${index}.precio_unitario`, formatEsVeInput(p.precio, 2), { shouldDirty: true, shouldValidate: true });
                           },
                         })}
                       >
@@ -623,9 +672,26 @@ export function PedidoFormModal({ pedido, clientes, productos, combos, onClose }
                     <Button type="button" variant="ghost" className="px-2 py-2 text-rose-600 hover:bg-rose-50" onClick={() => remove(index)} aria-label={`Quitar línea ${index + 1}`} icon={<Trash2 className="h-4 w-4" />}><span className="sr-only">Quitar</span></Button>
                   </div>
                   <div className="grid gap-3 sm:grid-cols-3 sm:items-end">
-                    <Input label="Cantidad" inputMode="decimal" error={errors.detalles?.[index]?.cantidad?.message} {...register(`detalles.${index}.cantidad`)} />
-                    <Input label={`Precio unit. (${etiquetaUnidadMonto})`} inputMode="decimal" error={errors.detalles?.[index]?.precio_unitario?.message} {...register(`detalles.${index}.precio_unitario`)} />
-                    <Input label={`Descuento línea (${etiquetaUnidadMonto})`} inputMode="decimal" error={errors.detalles?.[index]?.descuento_linea?.message} {...register(`detalles.${index}.descuento_linea`)} />
+                    <Input label="Cantidad" inputMode="decimal" error={errors.detalles?.[index]?.cantidad?.message} {...register(`detalles.${index}.cantidad`, { onBlur: formatMontoOnBlur(`detalles.${index}.cantidad`) })} />
+                    <Input label={`Precio unit. (${etiquetaUnidadMonto})`} inputMode="decimal" error={errors.detalles?.[index]?.precio_unitario?.message} {...register(`detalles.${index}.precio_unitario`, { onBlur: formatMontoOnBlur(`detalles.${index}.precio_unitario`) })} />
+                    {(() => {
+                      const precioBase =
+                        linea.precio_unitario ||
+                        (tipoItem === "producto"
+                          ? productos.find((p) => String(p.id) === linea.producto)?.precio || "0"
+                          : combos.find((c) => String(c.id) === linea.combo)?.precio || "0");
+                      const brutoBase = multiplyDecimals(linea.cantidad || "0", precioBase, 2);
+                      const subtotalBase = subtractDecimals(brutoBase, linea.descuento_linea || "0", 2);
+                      return (
+                        <Input
+                          label={`Subtotal (${etiquetaUnidadMonto})`}
+                          value={formatEsVeInput(subtotalBase, 2) || "0,00"}
+                          disabled
+                          readOnly
+                        />
+                      );
+                    })()}
+                    <input type="hidden" {...register(`detalles.${index}.descuento_linea`)} />
                     <input type="hidden" {...register(`detalles.${index}.aplica_iva`)} />
                   </div>
                 </div>
@@ -636,7 +702,7 @@ export function PedidoFormModal({ pedido, clientes, productos, combos, onClose }
 
         <TextArea label="Notas" rows={3} placeholder="Observaciones, instrucciones de entrega, etc." {...register("notas")} />
         <Alert tone="info">
-          El pedido se calcula en Bs (VES) usando como base la tasa seleccionada (BCV, EUR, USDT o Ajuste), sin alterar automáticamente los precios/montos (solo si los cambias manualmente). Al confirmarlo se descuenta el inventario y, si es a crédito, se genera la deuda correspondiente. Los precios y costos quedan congelados.
+          El pedido se calcula en Bs (VES) usando como base la tasa seleccionada (BCV, EUR, USDT, AJU o Ajuste), sin alterar automáticamente los precios/montos (solo si los cambias manualmente). Al confirmarlo se descuenta el inventario y, si es a crédito, se genera la deuda correspondiente. Los precios y costos quedan congelados.
         </Alert>
       </form>
     </Modal>

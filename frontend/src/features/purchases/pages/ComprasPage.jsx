@@ -41,6 +41,7 @@ function TasaCompraLabel({ compra }) {
     const necesitaInferir = compra.moneda === "VES" && !coincideBcv;
     const tasaEur = useTasaVigente("VES", "EUR", necesitaInferir ? compra.fecha : "");
     const tasaUsdt = useTasaVigente("VES", "USDT", necesitaInferir ? compra.fecha : "");
+    const tasaAju = useTasaVigente("VES", "AJU", necesitaInferir ? compra.fecha : "");
 
     if (coincideBcv) return <>BCV USD · {tasa}</>;
     if (compra.moneda === "VES") {
@@ -50,7 +51,10 @@ function TasaCompraLabel({ compra }) {
         if (tasaUsdt.data?.tasa && Math.abs(tasaDoc - Number(tasaUsdt.data.tasa)) < 0.000001) {
             return <>USDT · {tasa}</>;
         }
-        if (necesitaInferir && (!tasaEur.isFetched || !tasaUsdt.isFetched)) {
+        if (tasaAju.data?.tasa && Math.abs(tasaDoc - Number(tasaAju.data.tasa)) < 0.000001) {
+            return <>Ajustada (AJU) · {tasa}</>;
+        }
+        if (necesitaInferir && (!tasaEur.isFetched || !tasaUsdt.isFetched || !tasaAju.isFetched)) {
             return <>{tasa} · tasa doc.</>;
         }
         return <>Ajuste/Manual · {tasa}</>;

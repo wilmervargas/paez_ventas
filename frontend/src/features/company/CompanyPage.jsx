@@ -7,7 +7,6 @@ import { z } from "zod";
 import { Alert } from "../../components/ui/Alert";
 import { Button } from "../../components/ui/Button";
 import { Card, CardBody, CardHeader } from "../../components/ui/Card";
-import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
 import { ImageInput } from "../../components/ui/ImageInput";
 import { Input } from "../../components/ui/Input";
 import { PageLoader } from "../../components/ui/Spinner";
@@ -57,10 +56,6 @@ export function CompanyPage() {
     const [success, setSuccess] = useState(null);
     const [logoFile, setLogoFile] = useState(null);
     const [quitarLogo, setQuitarLogo] = useState(false);
-    const [showDbReset, setShowDbReset] = useState(false);
-    const [dbResetLoading, setDbResetLoading] = useState(false);
-    const [dbResetError, setDbResetError] = useState(null);
-    const canResetDb = Boolean(user?.is_superuser);
     const { register, handleSubmit, reset, formState: { errors, isSubmitting }, } = useForm({
         resolver: zodResolver(schema),
         defaultValues: toFormValues(company),
@@ -113,21 +108,6 @@ export function CompanyPage() {
             setError(getErrorMessage(err, "No se pudieron guardar los datos de la empresa."));
         }
     });
-    const handleDbReset = async () => {
-        setDbResetError(null);
-        setDbResetLoading(true);
-        try {
-            const { data } = await api.post("/company/limpiar-base-datos/");
-            await queryClient.invalidateQueries();
-            setShowDbReset(false);
-            setSuccess(data?.detail || "Base de datos depurada correctamente. Se conservaron empresa, tasas de cambio y catálogos (categorías/unidades).");
-            setError(null);
-        } catch (err) {
-            setDbResetError(getErrorMessage(err, "No se pudo limpiar la base de datos."));
-        } finally {
-            setDbResetLoading(false);
-        }
-    };
 
     return (<div className="mx-auto max-w-5xl space-y-6">
       <div className="flex items-start gap-3">
@@ -182,30 +162,6 @@ export function CompanyPage() {
         </Card>
       </form>
 
-      {canResetDb ? (<Card>
-          <CardHeader title="Sistema" description="Acciones de mantenimiento del sistema (depuración y arranque en limpio)."/>
-          <CardBody className="space-y-4">
-            <Alert tone="warning">
-              Esto borrará todos los registros excepto: <strong>empresa</strong>, <strong>tasas de cambio</strong> y <strong>catálogos</strong> (categorías y unidades). Se conservará tu usuario autorizado. La acción es irreversible.
-            </Alert>
-            <div className="flex justify-end">
-              <Button type="button" variant="danger" onClick={() => { setDbResetError(null); setShowDbReset(true); }}>
-                Limpiar base de datos
-              </Button>
-            </div>
-          </CardBody>
-        </Card>) : null}
 
-      <ConfirmDialog
-        open={showDbReset}
-        title="Limpiar base de datos"
-        message="¿Seguro que deseas limpiar la base de datos? Se eliminarán clientes, proveedores, productos/combos, inventario, compras, pedidos, finanzas (deudas, cuotas, pagos y caja), secuencias, sesiones y demás registros operativos, conservando solo empresa, tasas de cambio, categorías, unidades de medida y usuarios. Esta acción no se puede deshacer."
-        confirmLabel="Sí, limpiar base de datos"
-        cancelLabel="Cancelar"
-        loading={dbResetLoading}
-        error={dbResetError}
-        onConfirm={handleDbReset}
-        onClose={() => { if (!dbResetLoading) { setShowDbReset(false); setDbResetError(null); } }}
-      />
     </div>);
 }

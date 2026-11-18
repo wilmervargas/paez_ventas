@@ -60,6 +60,7 @@ function useTipoTasaPedido(pedido) {
   const necesitaInferir = pedido.moneda === "VES" && !coincideBcv;
   const tasaEur = useTasaVigente("VES", "EUR", necesitaInferir ? pedido.fecha : "");
   const tasaUsdt = useTasaVigente("VES", "USDT", necesitaInferir ? pedido.fecha : "");
+  const tasaAju = useTasaVigente("VES", "AJU", necesitaInferir ? pedido.fecha : "");
 
   if (coincideBcv) {
     return { tipo: "usd_bcv", simbolo: "$", sufijo: "USD", listo: true };
@@ -71,7 +72,10 @@ function useTipoTasaPedido(pedido) {
     if (tasaUsdt.data?.tasa && Math.abs(tasaDoc - Number(tasaUsdt.data.tasa)) < 0.000001) {
       return { tipo: "usdt", simbolo: "USDT", sufijo: "USDT", listo: true };
     }
-    if (necesitaInferir && (!tasaEur.isFetched || !tasaUsdt.isFetched)) {
+    if (tasaAju.data?.tasa && Math.abs(tasaDoc - Number(tasaAju.data.tasa)) < 0.000001) {
+      return { tipo: "aju", simbolo: "AJU", sufijo: "AJU", listo: true };
+    }
+    if (necesitaInferir && (!tasaEur.isFetched || !tasaUsdt.isFetched || !tasaAju.isFetched)) {
       return { tipo: "pendiente", simbolo: null, sufijo: null, listo: false };
     }
     return { tipo: "ajuste", simbolo: null, sufijo: null, listo: true };
@@ -86,6 +90,7 @@ function TasaVentaLabel({ pedido }) {
   if (info.tipo === "usd_bcv") return `Dólar BCV: ${tasa} por $1`;
   if (info.tipo === "eur_bcv") return `Euro BCV: ${tasa} por 1 €`;
   if (info.tipo === "usdt") return `USDT: ${tasa} por 1 USDT`;
+  if (info.tipo === "aju") return `Ajustada (AJU): ${tasa} por 1 AJU`;
   if (info.tipo === "ajuste") return `Ajuste/Manual: ${tasa}`;
   if (info.tipo === "pendiente") return `Tasa aplicada: ${tasa}`;
   return `${pedido.moneda}: ${tasa}`;
@@ -108,6 +113,8 @@ function TotalesVenta({ pedido }) {
       equivalente = `€ ${eq}`;
     } else if (info.tipo === "usdt") {
       equivalente = `${eq} USDT`;
+    } else if (info.tipo === "aju") {
+      equivalente = `${eq} AJU`;
     } else if (pedido.moneda === "VES") {
       equivalente = `${eq} (tasa contratada)`;
     }

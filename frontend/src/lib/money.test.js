@@ -7,6 +7,9 @@ describe("formatMoney", () => {
     it("devuelve un guion para valores inválidos", () => {
         expect(formatMoney("no-es-numero")).toBe("—");
     });
+    it("acepta monedas no ISO como USDT sin romper", () => {
+        expect(formatMoney("10", "USDT")).toBe("USDT 10,00");
+    });
 });
 describe("formatRate", () => {
     it("formatea una tasa en bolívares con 2 decimales", () => {
