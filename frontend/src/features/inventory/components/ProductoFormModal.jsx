@@ -42,7 +42,7 @@ function toDefaults(producto) {
         precio: producto?.precio ? toDisplayDecimal(producto.precio, 2) : "0,00",
         stock_minimo: producto?.stock_minimo ? toDisplayDecimal(producto.stock_minimo, 2) : "0,00",
         stock_inicial: "0,00",
-        iva_aplicable: producto?.iva_aplicable ?? true,
+        iva_aplicable: producto?.iva_aplicable ?? false,
         activo: producto?.activo ?? true,
     };
 }

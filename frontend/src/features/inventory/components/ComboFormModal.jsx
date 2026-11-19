@@ -5,6 +5,7 @@ import { useFieldArray, useForm } from "react-hook-form";
 import { z } from "zod";
 import { Alert } from "../../../components/ui/Alert";
 import { Button } from "../../../components/ui/Button";
+import { ImageInput } from "../../../components/ui/ImageInput";
 import { Input } from "../../../components/ui/Input";
 import { Modal } from "../../../components/ui/Modal";
 import { Select } from "../../../components/ui/Select";
@@ -57,6 +58,8 @@ function toDefaults(combo) {
 }
 export function ComboFormModal({ combo, productos, onClose, }) {
     const [error, setError] = useState(null);
+    const [imagen, setImagen] = useState(null);
+    const [quitarImagen, setQuitarImagen] = useState(false);
     const mutation = useSaveCombo();
     const { register, control, handleSubmit, formState: { errors, isSubmitting }, } = useForm({
         resolver: zodResolver(schema),
@@ -75,6 +78,8 @@ export function ComboFormModal({ combo, productos, onClose, }) {
                     producto: Number(componente.producto),
                     cantidad: toApiDecimal(componente.cantidad, 2),
                 })),
+                // `""` pide borrar la imagen guardada; sin valor no se toca.
+                imagen: imagen ?? (quitarImagen ? "" : undefined),
             };
             if (combo) {
                 await mutation.mutateAsync({ id: combo.id, payload });
@@ -114,6 +119,17 @@ export function ComboFormModal({ combo, productos, onClose, }) {
             Combo activo
           </label>
         </div>
+
+        <ImageInput
+          label="Imagen del combo"
+          alt={`Imagen de ${combo?.nombre ?? "nuevo combo"}`}
+          currentUrl={combo?.imagen_url ?? null}
+          file={imagen}
+          remove={quitarImagen}
+          onFileChange={setImagen}
+          onRemoveChange={setQuitarImagen}
+          size="lg"
+        />
 
         <div className="rounded-xl border border-slate-200 p-4">
           <div className="mb-3 flex items-center justify-between gap-3">

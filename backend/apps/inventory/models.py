@@ -133,6 +133,7 @@ class Combo(BaseModel):
         default=Decimal("0.00"),
     )
     activo = models.BooleanField("activo", default=True, db_index=True)
+    imagen = models.ImageField("imagen", upload_to="combos/", blank=True)
 
     class Meta:
         verbose_name = "combo"

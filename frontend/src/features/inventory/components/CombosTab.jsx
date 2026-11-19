@@ -6,6 +6,7 @@ import { Button } from "../../../components/ui/Button";
 import { Card, CardHeader } from "../../../components/ui/Card";
 import { ConfirmDialog } from "../../../components/ui/ConfirmDialog";
 import { EmptyState } from "../../../components/ui/EmptyState";
+import { ImageViewerModal } from "../../../components/ui/ImageViewerModal";
 import { Input } from "../../../components/ui/Input";
 import { Pagination } from "../../../components/ui/Pagination";
 import { Select } from "../../../components/ui/Select";
@@ -29,6 +30,7 @@ export function CombosTab() {
     const [estado, setEstado] = useState("activos");
     const [editing, setEditing] = useState(undefined);
     const [borrando, setBorrando] = useState(null);
+    const [imagenVista, setImagenVista] = useState(null);
     const deleteCombo = useDeleteCombo();
     async function confirmarBorrado() {
         if (!borrando) {
@@ -91,7 +93,33 @@ export function CombosTab() {
               <tbody className="divide-y divide-slate-100">
                 {data.results.map((combo) => (<tr key={combo.id} className={combo.activo ? "bg-emerald-50/60 hover:bg-emerald-100/60" : "bg-rose-50 hover:bg-rose-100/70"}>
                     <td className="px-4 py-3 font-mono text-xs text-slate-500">{combo.sku}</td>
-                    <td className="px-4 py-3 font-semibold text-slate-900">{combo.nombre}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        {combo.imagen_url ? (
+                          <button
+                            type="button"
+                            onClick={() => setImagenVista({ src: combo.imagen_url, alt: combo.nombre })}
+                            className="shrink-0 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                            aria-label={`Ver imagen de ${combo.nombre}`}
+                          >
+                            <img
+                              src={combo.imagen_url}
+                              alt=""
+                              loading="lazy"
+                              className="h-32 w-32 rounded-md object-cover ring-1 ring-slate-200 transition hover:opacity-90"
+                            />
+                          </button>
+                        ) : (
+                          <div
+                            aria-hidden="true"
+                            className="flex h-32 w-32 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-400 ring-1 ring-slate-200"
+                          >
+                            <Layers className="h-16 w-16" />
+                          </div>
+                        )}
+                        <span className="font-semibold text-slate-900">{combo.nombre}</span>
+                      </div>
+                    </td>
                     <td className="px-4 py-3">
                       <ul className="space-y-0.5 text-xs text-slate-600">
                         {combo.detalle.map((detalle) => (<li key={detalle.id}>
@@ -137,5 +165,11 @@ export function CombosTab() {
             : ""} confirmLabel="Eliminar combo" loading={deleteCombo.isPending} error={deleteCombo.isError
             ? getErrorMessage(deleteCombo.error, "No se pudo eliminar el combo.")
             : null} onConfirm={confirmarBorrado} onClose={() => setBorrando(null)}/>
+
+      <ImageViewerModal
+        src={imagenVista?.src ?? null}
+        alt={imagenVista?.alt}
+        onClose={() => setImagenVista(null)}
+      />
     </Card>);
 }

@@ -49,16 +49,40 @@ export async function updateProducto(id, payload) {
 export async function deleteProducto(id) {
     await api.delete(`/productos/${id}/`);
 }
+function buildComboFormData(payload) {
+    const form = new FormData();
+    form.append("sku", String(payload.sku ?? ""));
+    form.append("nombre", String(payload.nombre ?? ""));
+    form.append("precio", nd(payload.precio ?? "0.00"));
+    form.append("activo", payload.activo ? "true" : "false");
+    if (Array.isArray(payload.componentes)) {
+        form.append("componentes", JSON.stringify(payload.componentes));
+    }
+    // `""` pide al backend borrar la imagen guardada; sin valor no se toca.
+    if (payload.imagen instanceof File || payload.imagen === "") {
+        form.append("imagen", payload.imagen);
+    }
+    return form;
+}
+function comboSinImagen(payload) {
+    const { imagen: _imagen, ...rest } = payload;
+    return rest;
+}
+function comboUsaFormData(payload) {
+    return payload.imagen instanceof File || payload.imagen === "";
+}
 export async function listCombos(params) {
     const { data } = await api.get("/combos/", { params });
     return data;
 }
 export async function createCombo(payload) {
-    const { data } = await api.post("/combos/", payload);
+    const body = comboUsaFormData(payload) ? buildComboFormData(payload) : comboSinImagen(payload);
+    const { data } = await api.post("/combos/", body);
     return data;
 }
 export async function updateCombo(id, payload) {
-    const { data } = await api.patch(`/combos/${id}/`, payload);
+    const body = comboUsaFormData(payload) ? buildComboFormData(payload) : comboSinImagen(payload);
+    const { data } = await api.patch(`/combos/${id}/`, body);
     return data;
 }
 export async function deleteCombo(id) {

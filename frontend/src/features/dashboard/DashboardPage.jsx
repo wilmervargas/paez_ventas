@@ -1,45 +1,10 @@
-import { useQueryClient } from "@tanstack/react-query";
-import { Database } from "lucide-react";
-import { useState } from "react";
-import { Alert } from "../../components/ui/Alert";
-import { Button } from "../../components/ui/Button";
-import { Card, CardBody, CardHeader } from "../../components/ui/Card";
-import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
 import { ServerStatus } from "../../components/layout/ServerStatus";
 import { useAuth } from "../../context/auth-context";
-import { api } from "../../lib/api";
-import { getErrorMessage } from "../../lib/errors";
 import { RatesManager } from "../rates/components/RatesManager";
-
-const DB_RESET_EMAIL = "wilmere.vargas@gmail.com";
 
 export function DashboardPage() {
   const { user } = useAuth();
-  const queryClient = useQueryClient();
   const firstName = user?.nombre.split(/\s+/)[0] ?? "";
-  const canResetDb = (user?.email || "").toLowerCase() === DB_RESET_EMAIL;
-  const [showDbReset, setShowDbReset] = useState(false);
-  const [dbResetLoading, setDbResetLoading] = useState(false);
-  const [dbResetError, setDbResetError] = useState(null);
-  const [dbResetSuccess, setDbResetSuccess] = useState(null);
-
-  const handleDbReset = async () => {
-    setDbResetError(null);
-    setDbResetLoading(true);
-    try {
-      const { data } = await api.post("/company/limpiar-base-datos/");
-      await queryClient.invalidateQueries();
-      setShowDbReset(false);
-      setDbResetSuccess(
-        data?.detail ||
-          "Base de datos depurada correctamente. Se conservaron empresa, tasas de cambio, categorías, unidades, clientes, proveedores y usuarios."
-      );
-    } catch (err) {
-      setDbResetError(getErrorMessage(err, "No se pudo limpiar la base de datos."));
-    } finally {
-      setDbResetLoading(false);
-    }
-  };
 
   return (
     <div className="space-y-6">
@@ -59,54 +24,6 @@ export function DashboardPage() {
       </section>
 
       <RatesManager />
-
-      {canResetDb ? (
-        <Card>
-          <CardHeader
-            title="Sistema"
-            description="Acciones de mantenimiento del sistema. Disponibles solo para el usuario autorizado."
-          />
-          <CardBody className="space-y-4">
-            {dbResetSuccess ? <Alert tone="success">{dbResetSuccess}</Alert> : null}
-            <Alert tone="warning">
-              <strong>Limpiar base de datos:</strong> elimina los registros operativos/de prueba (incluidos{" "}
-              <strong>inventario</strong> y <strong>combos</strong>) y conserva <strong>empresa</strong>,{" "}
-              <strong>tasas de cambio</strong>, <strong>categorías</strong>, <strong>unidades</strong>,{" "}
-              <strong>clientes</strong>, <strong>proveedores</strong> y <strong>usuarios</strong>. Acción irreversible, pensada para depuración y arranque en limpio.
-            </Alert>
-            <div className="flex justify-end">
-              <Button
-                type="button"
-                variant="danger"
-                icon={<Database className="h-4 w-4" />}
-                onClick={() => {
-                  setDbResetError(null);
-                  setShowDbReset(true);
-                }}
-              >
-                Limpiar base de datos
-              </Button>
-            </div>
-          </CardBody>
-        </Card>
-      ) : null}
-
-      <ConfirmDialog
-        open={showDbReset}
-        title="Limpiar base de datos"
-        message="¿Seguro que deseas limpiar la base de datos? Se eliminarán productos/combos, inventario, compras, pedidos, finanzas (deudas, cuotas, pagos y caja), secuencias, sesiones y demás registros operativos, conservando empresa, tasas de cambio, categorías, unidades de medida, clientes, proveedores y usuarios. Esta acción no se puede deshacer."
-        confirmLabel="Sí, limpiar base de datos"
-        cancelLabel="Cancelar"
-        loading={dbResetLoading}
-        error={dbResetError}
-        onConfirm={handleDbReset}
-        onClose={() => {
-          if (!dbResetLoading) {
-            setShowDbReset(false);
-            setDbResetError(null);
-          }
-        }}
-      />
     </div>
   );
 }

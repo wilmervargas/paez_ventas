@@ -285,10 +285,19 @@ def crear_combo(data: dict, componentes: list[dict], user=None) -> Combo:
 
 @transaction.atomic
 def actualizar_combo(combo: Combo, data: dict, componentes: list[dict] | None, user=None) -> Combo:
+    imagen_previa = combo.imagen
+    # `imagen` presente y vacía (`""` o null): el cliente pidió borrarla.
+    quitar_imagen = "imagen" in data and data["imagen"] in (None, "")
+    if quitar_imagen:
+        data["imagen"] = ""
+
     for field, value in data.items():
         setattr(combo, field, value)
     _validar_modelo(combo)
     combo.save()
+
+    # Borra el archivo físico si se quitó la imagen o si se reemplazó.
+    delete_replaced_file(imagen_previa, combo.imagen)
 
     if componentes is not None:
         preparados = _preparar_componentes(componentes)
@@ -366,7 +375,12 @@ def eliminar_producto(producto: Producto) -> None:
 def eliminar_combo(combo: Combo) -> None:
     """Elimina físicamente el combo; sus componentes se borran en cascada."""
     sku = combo.sku
+    imagen = combo.imagen
+    nombre_imagen = imagen.name if imagen else ""
     _eliminar_o_vinculado(combo, "el combo")
+    if nombre_imagen:
+        # El combo ya no existe: su imagen queda huérfana en el storage.
+        imagen.storage.delete(nombre_imagen)
     logger.info("Catálogo: combo %s eliminado", sku)
 
 

@@ -1,6 +1,7 @@
 import { ImagePlus, RotateCcw, X } from "lucide-react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "./Button";
+import { ImageViewerModal } from "./ImageViewerModal";
 /**
  * Entrada de imagen opcional con vista previa y borrado.
  *
@@ -9,7 +10,8 @@ import { Button } from "./Button";
  * para que el backend elimine la imagen actual. Dejar el campo vacío sin
  * más es válido: no se envía nada y la imagen no cambia.
  */
-export function ImageInput({ currentUrl, file, remove, onFileChange, onRemoveChange, label = "Imagen", hint, alt, disabled = false, }) {
+export function ImageInput({ currentUrl, file, remove, onFileChange, onRemoveChange, label = "Imagen", hint, alt, disabled = false, size = "md", }) {
+    const [verCompleta, setVerCompleta] = useState(false);
     // La URL de vista previa se deriva del archivo: se crea una sola vez por
     // archivo y se revoca cuando cambia o al desmontar.
     const previewUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
@@ -22,6 +24,8 @@ export function ImageInput({ currentUrl, file, remove, onFileChange, onRemoveCha
     }, [previewUrl]);
     const preview = file ? previewUrl : remove ? null : currentUrl ?? null;
     const puedeQuitar = Boolean(file) || Boolean(currentUrl);
+    const previewBoxClass = size === "lg" ? "h-80 w-80" : "h-20 w-20";
+    const placeholderIconClass = size === "lg" ? "h-24 w-24 text-slate-400" : "h-6 w-6 text-slate-400";
     function handleFile(event) {
         onFileChange(event.target.files?.[0] ?? null);
         if (event.target.files?.[0]) {
@@ -36,9 +40,19 @@ export function ImageInput({ currentUrl, file, remove, onFileChange, onRemoveCha
         onFileChange(null);
         onRemoveChange(false);
     }
-    return (<div className="flex flex-col gap-3 rounded-xl border border-dashed border-slate-300 p-4 sm:flex-row sm:items-center">
-      <div className="grid h-20 w-20 shrink-0 place-items-center overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
-        {preview ? (<img src={preview} alt={alt ?? label} className="h-full w-full object-contain"/>) : (<ImagePlus className="h-6 w-6 text-slate-400"/>)}
+    return (<>
+    <div className="flex flex-col gap-3 rounded-xl border border-dashed border-slate-300 p-4 sm:flex-row sm:items-center">
+      <div className={`grid ${previewBoxClass} shrink-0 place-items-center overflow-hidden rounded-xl border border-slate-200 bg-slate-50`}>
+        {preview ? (
+          <button
+            type="button"
+            onClick={() => setVerCompleta(true)}
+            className="h-full w-full focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-inset"
+            aria-label={`Ver imagen completa: ${alt ?? label}`}
+          >
+            <img src={preview} alt={alt ?? label} className="h-full w-full cursor-pointer object-contain transition hover:opacity-90"/>
+          </button>
+        ) : (<ImagePlus className={placeholderIconClass}/>)}
       </div>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold text-slate-900">{label}</p>
@@ -55,5 +69,11 @@ export function ImageInput({ currentUrl, file, remove, onFileChange, onRemoveCha
             Restaurar
           </Button>) : null}
       </div>
-    </div>);
+    </div>
+    <ImageViewerModal
+      src={verCompleta ? preview : null}
+      alt={alt ?? label}
+      onClose={() => setVerCompleta(false)}
+    />
+    </>);
 }

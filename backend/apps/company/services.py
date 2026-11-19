@@ -477,15 +477,21 @@ def upsert_empresa(data: dict, user=None) -> Empresa:
 
 
 def limpiar_base_datos(*, requested_by) -> dict[str, int]:
-    """Depura la base de datos conservando datos base/configuración y terceros.
+    """Depura la base de datos conservando datos base/configuración, terceros e inventario.
 
-    Conserva: Empresa, TasaCambio, CategoriaProducto, UnidadMedida, clientes,
-    proveedores y todos los usuarios (incluyendo sus correos adicionales).
-    Elimina el resto de registros operativos/transaccionales (incluido inventario
-    y combos), pensado para periodo de prueba/arranque en limpio.
+    Conserva (sin alterarlos): Empresa, TasaCambio, CategoriaProducto, UnidadMedida,
+    clientes, proveedores, todos los usuarios (incluyendo sus correos adicionales),
+    productos, combos, componentes de combos y movimientos de inventario.
+    Elimina registros operativos/transaccionales (compras, pedidos, finanzas, caja,
+    secuencias y sesiones), pensado para depuración y arranque en limpio.
+
+    Para no dejar referencias huérfanas, limpia `referencia_tipo`/`referencia_id` en
+    movimientos de inventario que apuntaban a documentos purgados (compras/pedidos),
+    sin modificar cantidades, costos, stock ni ningún otro dato del movimiento.
     """
-    email = (getattr(requested_by, "email", "") or "").lower()
-    if email != "wilmere.vargas@gmail.com":
+    email = (getattr(requested_by, "email", "") or "").strip().lower()
+    is_superuser = bool(getattr(requested_by, "is_superuser", False))
+    if not (is_superuser or email == "wilmere.vargas@gmail.com"):
         raise PermissionError("Solo el usuario autorizado puede limpiar la base de datos.")
 
     from django.apps import apps as django_apps
@@ -493,12 +499,13 @@ def limpiar_base_datos(*, requested_by) -> dict[str, int]:
 
     from apps.common.models import Secuencia
     from apps.finances.models import CajaSesion, Cuota, Deuda, MovimientoCaja, Pago, PagoAplicacion
-    from apps.inventory.models import Combo, ComboProducto, MovimientoInventario, Producto
+    from apps.inventory.models import MovimientoInventario
     from apps.orders.models import Pedido, PedidoDetalle
     from apps.purchases.models import Compra, CompraDetalle
 
-    # Conservados: Empresa, TasaCambio, CategoriaProducto, UnidadMedida,
-    # Cliente, Proveedor, User, UserEmailAdicional.
+    # Conservados (sin alterar): Empresa, TasaCambio, CategoriaProducto, UnidadMedida,
+    # Cliente, Proveedor, User, UserEmailAdicional, Producto, Combo, ComboProducto,
+    # MovimientoInventario.
     pasos = [
         ("aplicaciones_pago", PagoAplicacion.objects.all()),
         ("movimientos_caja", MovimientoCaja.objects.all()),
@@ -510,10 +517,6 @@ def limpiar_base_datos(*, requested_by) -> dict[str, int]:
         ("sesiones_caja", CajaSesion.objects.all()),
         ("detalles_compra", CompraDetalle.objects.all()),
         ("compras", Compra.objects.all()),
-        ("movimientos_inventario", MovimientoInventario.objects.all()),
-        ("combo_productos", ComboProducto.objects.all()),
-        ("combos", Combo.objects.all()),
-        ("productos", Producto.objects.all()),
         ("secuencias", Secuencia.objects.all()),
     ]
 
@@ -524,6 +527,13 @@ def limpiar_base_datos(*, requested_by) -> dict[str, int]:
         for label, qs in pasos:
             count, _ = qs.delete()
             deleted[label] = count
+
+        # Limpia referencias huérfanas en el kardex conservado (documentos purgados),
+        # sin modificar cantidades, costos, stock ni ningún otro dato del movimiento.
+        refs_huerfanas = MovimientoInventario.objects.filter(
+            referencia_tipo__in=("compra", "compra_anulada", "pedido", "pedido_anulado")
+        ).update(referencia_tipo="", referencia_id=None)
+        deleted["referencias_movimientos_limpiadas"] = refs_huerfanas
 
         for app_label, model_name in [
             ("token_blacklist", "BlacklistedToken"),

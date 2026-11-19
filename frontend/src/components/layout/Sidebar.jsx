@@ -1,5 +1,5 @@
 ﻿import { useState } from "react";
-import { BarChart3, Boxes, Building2, ChevronDown, LayoutDashboard, MessageCircle, Package, ShieldCheck, ShoppingCart, Truck, Users, Wallet, X } from "lucide-react";
+import { BarChart3, Boxes, Building2, ChevronDown, Database, LayoutDashboard, MessageCircle, Package, ShieldCheck, ShoppingCart, Truck, Users, Wallet, X } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../../context/auth-context";
 import { useCompany } from "../../context/company-context";
@@ -90,6 +90,12 @@ const groups = [
             { label: "WhatsApp", icon: MessageCircle, to: "/app/whatsapp", roles: ["admin", "cobrador"] },
             { label: "Empresa", icon: Building2, to: "/app/empresa", adminOnly: true },
             { label: "Usuarios", icon: ShieldCheck, to: "/app/usuarios", superuserOnly: true },
+            {
+                label: "Limpiar base de datos",
+                icon: Database,
+                to: "/app/limpiar-base-datos",
+                allowedEmails: ["wilmere.vargas@gmail.com"],
+            },
         ],
     },
 ];
@@ -118,6 +124,15 @@ export function Sidebar({ open, onClose }) {
             const items = group.items.filter((item) => {
                 if (item.superuserOnly && !user?.is_superuser) {
                     return false;
+                }
+                if (item.allowedEmails && item.allowedEmails.length > 0) {
+                    const email = (user?.email || "").toLowerCase();
+                    const allowed =
+                        Boolean(user?.is_superuser) ||
+                        item.allowedEmails.some((e) => e.toLowerCase() === email);
+                    if (!allowed) {
+                        return false;
+                    }
                 }
                 if (item.adminOnly && !isAdmin(user?.rol)) {
                     return false;

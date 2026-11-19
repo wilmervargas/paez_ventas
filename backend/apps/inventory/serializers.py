@@ -188,6 +188,8 @@ class ComboSerializer(serializers.ModelSerializer):
     componentes = ComboComponenteInputSerializer(many=True, write_only=True)
     detalle = ComboProductoSerializer(source="componentes", many=True, read_only=True)
     disponibilidad = serializers.SerializerMethodField()
+    imagen = ImagenOpcionalField(required=False, allow_null=True)
+    imagen_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Combo
@@ -197,6 +199,8 @@ class ComboSerializer(serializers.ModelSerializer):
             "nombre",
             "precio",
             "activo",
+            "imagen",
+            "imagen_url",
             "componentes",
             "detalle",
             "disponibilidad",
@@ -208,6 +212,35 @@ class ComboSerializer(serializers.ModelSerializer):
 
     def get_disponibilidad(self, obj: Combo) -> int:
         return disponibilidad_combo(obj)
+
+    def get_imagen_url(self, obj: Combo) -> str | None:
+        if not obj.imagen:
+            return None
+        request = self.context.get("request")
+        url = obj.imagen.url
+        return request.build_absolute_uri(url) if request else url
+
+    def to_internal_value(self, data):
+        """Acepta `componentes` como JSON string cuando llega en multipart/form-data."""
+        import json
+
+        componentes = data.get("componentes") if hasattr(data, "get") else None
+        if isinstance(componentes, str):
+            try:
+                parsed = json.loads(componentes)
+            except (TypeError, ValueError):
+                parsed = None
+            if parsed is not None:
+                # Convertir a dict plano: para QueryDict (HTML/multipart) DRF usa getlist()
+                # en campos many=True; un dict plano evita esa ruta y permite pasar la lista.
+                if hasattr(data, "dict"):
+                    data = data.dict()
+                elif hasattr(data, "keys"):
+                    data = {k: data.get(k) for k in data.keys()}
+                else:
+                    data = dict(data)
+                data["componentes"] = parsed
+        return super().to_internal_value(data)
 
     def validate_sku(self, value: str) -> str:
         value = value.strip().upper()

@@ -1,4 +1,4 @@
-import { History, Pencil, Plus, Search, SlidersHorizontal, Trash2 } from "lucide-react";
+import { History, Package, Pencil, Plus, Search, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useDeferredValue, useState } from "react";
 import { Alert } from "../../../components/ui/Alert";
 import { Badge } from "../../../components/ui/Badge";
@@ -6,6 +6,7 @@ import { Button } from "../../../components/ui/Button";
 import { Card, CardHeader } from "../../../components/ui/Card";
 import { ConfirmDialog } from "../../../components/ui/ConfirmDialog";
 import { EmptyState } from "../../../components/ui/EmptyState";
+import { ImageViewerModal } from "../../../components/ui/ImageViewerModal";
 import { Input } from "../../../components/ui/Input";
 import { Pagination } from "../../../components/ui/Pagination";
 import { Select } from "../../../components/ui/Select";
@@ -34,6 +35,7 @@ export function ProductosTab({ onVerKardex }) {
     const [editing, setEditing] = useState(undefined);
     const [adjusting, setAdjusting] = useState(null);
     const [borrando, setBorrando] = useState(null);
+    const [imagenVista, setImagenVista] = useState(null);
     const deleteProducto = useDeleteProducto();
     async function confirmarBorrado() {
         if (!borrando) {
@@ -113,11 +115,37 @@ export function ProductosTab({ onVerKardex }) {
                 {data.results.map((producto) => (<tr key={producto.id} className={producto.activo ? "bg-emerald-50/60 hover:bg-emerald-100/60" : "bg-rose-50 hover:bg-rose-100/70"}>
                     <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-500">{producto.sku}</td>
                     <td className="min-w-[15.5rem] w-[15.5rem] px-4 py-3">
-                      <div>
-                        <p className="text-[12px] font-semibold text-slate-900">{producto.nombre}</p>
-                        <p className="text-xs text-slate-500">
-                          {producto.unidad_nombre} ({producto.unidad_abreviatura})
-                        </p>
+                      <div className="flex items-center gap-3">
+                        {producto.imagen_url ? (
+                          <button
+                            type="button"
+                            onClick={() => setImagenVista({ src: producto.imagen_url, alt: producto.nombre })}
+                            className="shrink-0 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                            aria-label={`Ver imagen de ${producto.nombre}`}
+                          >
+                            <img
+                              src={producto.imagen_url}
+                              alt=""
+                              loading="lazy"
+                              className="h-8 w-8 rounded-md object-cover ring-1 ring-slate-200 transition hover:opacity-90"
+                            />
+                          </button>
+                        ) : (
+                          <div
+                            aria-hidden="true"
+                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-400 ring-1 ring-slate-200"
+                          >
+                            <Package className="h-4 w-4" />
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <p className="truncate text-[12px] font-semibold text-slate-900">
+                            {producto.nombre}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {producto.unidad_nombre} ({producto.unidad_abreviatura})
+                          </p>
+                        </div>
                       </div>
                     </td>
                     <td className="px-4 py-3 text-slate-600">{producto.categoria_nombre}</td>
@@ -175,5 +203,11 @@ export function ProductosTab({ onVerKardex }) {
             : ""} confirmLabel="Eliminar producto" loading={deleteProducto.isPending} error={deleteProducto.isError
             ? getErrorMessage(deleteProducto.error, "No se pudo eliminar el producto.")
             : null} onConfirm={confirmarBorrado} onClose={() => setBorrando(null)}/>
+
+      <ImageViewerModal
+        src={imagenVista?.src ?? null}
+        alt={imagenVista?.alt}
+        onClose={() => setImagenVista(null)}
+      />
     </Card>);
 }

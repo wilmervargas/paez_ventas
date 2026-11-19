@@ -54,6 +54,11 @@ const UsuariosPage = lazy(() => import("./features/users/pages/UsuariosPage").th
 const MantenimientoPage = lazy(() => import("./features/system/pages/MantenimientoPage").then((module) => ({
     default: module.MantenimientoPage,
 })));
+const LimpiarBaseDatosPage = lazy(() =>
+    import("./features/system/pages/LimpiarBaseDatosPage").then((module) => ({
+        default: module.LimpiarBaseDatosPage,
+    })),
+);
 const NotFoundPage = lazy(() => import("./features/errors/NotFoundPage").then((module) => ({
     default: module.NotFoundPage,
 })));
@@ -116,6 +121,9 @@ export default function App() {
               </RoleGuard>}/>
           <Route path="mantenimiento" element={<RoleGuard superuserOnly>
                 <MantenimientoPage />
+              </RoleGuard>}/>
+          <Route path="limpiar-base-datos" element={<RoleGuard allowedEmails={["wilmere.vargas@gmail.com"]}>
+                <LimpiarBaseDatosPage />
               </RoleGuard>}/>
           <Route path="*" element={<NotFoundPage />}/>
         </Route>

@@ -97,8 +97,9 @@ class LimpiarBaseDatosView(APIView):
 
     @extend_schema(request=None, responses={200: dict})
     def post(self, request):
-        email = (getattr(request.user, "email", "") or "").lower()
-        if email != "wilmere.vargas@gmail.com":
+        email = (getattr(request.user, "email", "") or "").strip().lower()
+        is_superuser = bool(getattr(request.user, "is_superuser", False))
+        if not (is_superuser or email == "wilmere.vargas@gmail.com"):
             return Response(
                 {
                     "detail": "Solo el usuario autorizado puede ejecutar esta acción.",
@@ -120,7 +121,7 @@ class LimpiarBaseDatosView(APIView):
             )
         return Response(
             {
-                "detail": "Base de datos depurada correctamente. Se conservaron empresa, tasas de cambio, categorías, unidades, clientes, proveedores y usuarios.",
+                "detail": "Base de datos depurada correctamente. Se conservaron empresa, tasas de cambio, categorías, unidades, clientes, proveedores, usuarios, productos, combos y movimientos de inventario (sin referencias huérfanas).",
                 "deleted": deleted,
             },
             status=status.HTTP_200_OK,
